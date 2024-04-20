@@ -1,6 +1,27 @@
 {
-    "cmake.configureSettings": {
-        // "PICO_SDK_PATH": "../../pico-sdk" // <-- Set this if you've not set ${env:PICO_SDK_PATH}
+    // These settings tweaks to the cmake plugin will ensure
+    // that you debug using cortex-debug instead of trying to launch
+    // a Pico binary on the host
+    //"cmake.options.statusBarVisibility": "hidden",
+    "cmake.options.advanced": {
+        "build": {
+            "statusBarVisibility": "visible"
+        },
+        "launch": {
+            "statusBarVisibility": "hidden"
+        },
+        "debug": {
+            "statusBarVisibility": "hidden"
+        }
     },
-    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+    "cmake.buildBeforeRun": true,
+    "cmake.configureSettings": {
+        "PICO_SDK_PATH": "../../pico-sdk", // <-- Set this if you've not set ${env:PICO_SDK_PATH}
+        "PICO_BOARD": "pico_w"
+    },
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "cmake.buildTask": false,
+    "files.associations": {
+        "cyw43_arch.h": "c"
+    }
 }

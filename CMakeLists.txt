@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 
-# Change your executable name to something creative!
-set(NAME pico-boilerplate) # <-- Name your project/executable here!
+set(NAME galactic-clock)
 
 include(pico_sdk_import.cmake)
 include(pimoroni_pico_import.cmake)
@@ -14,24 +13,29 @@ set(CMAKE_CXX_STANDARD 17)
 # Initialize the SDK
 pico_sdk_init()
 
-# Add your source files
 add_executable(${NAME}
-    main.cpp # <-- Add source files here!
+    main.cpp
+    ntp.c
 )
 
-# Include required libraries
-# This assumes `pimoroni-pico` is stored alongside your project
-include(common/pimoroni_i2c)
-include(common/pimoroni_bus)
-include(libraries/bitmap_fonts/bitmap_fonts)
-include(libraries/hershey_fonts/hershey_fonts)
-include(libraries/pico_explorer/pico_explorer)
+target_include_directories(${NAME} PRIVATE ${CMAKE_CURRENT_LIST_DIR} )
 
-# Don't forget to link the libraries you need!
+# This assumes `pimoroni-pico` is stored alongside the project
+include(libraries/galactic_unicorn/galactic_unicorn)
+include(libraries/pico_wireless/pico_wireless)
+
 target_link_libraries(${NAME}
-    pimoroni_i2c
-    pico_explorer # <-- List libraries here!
+    pico_stdlib
+    hardware_pio
+    hardware_adc
+    hardware_dma
+    pico_graphics
+    galactic_unicorn
+    pico_cyw43_arch_lwip_threadsafe_background
 )
+
+pico_enable_stdio_usb(${NAME} 1)
+pico_enable_stdio_uart(${NAME} 0)
 
 # create map/bin/hex file etc.
 pico_add_extra_outputs(${NAME})

@@ -1,1 +1,3 @@
 build/*
+okcolor.hpp
+wifi_credentials.hpp
