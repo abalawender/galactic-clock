@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .venv/
 *.uf2
+secrets.py
