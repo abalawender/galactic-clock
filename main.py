@@ -1,8 +1,9 @@
 """Weather clock for the Galactic Unicorn. Runs at boot as /main.py.
 
 Connects to WiFi (credentials in /secrets.py, not committed), syncs the RTC
-via NTP, fetches the forecast from open-meteo (no API key needed) and shows
-it on the 53x11 matrix: icon + current temperature, then high/low.
+via NTP (clock on screen), fetches the forecast from open-meteo (no API key
+needed) and rotates three screens on the 53x11 matrix: clock, weather icon +
+temperature, high/low.
 """
 import time
 
@@ -75,41 +76,95 @@ def _kind(code):
     return "rain"
 
 
-def draw_icon(code):
-    """9x10 icon in the left part of the matrix."""
+def _clear():
+    d.set_pen(d.create_pen(0, 0, 0))
+    d.rectangle(0, 0, gu.WIDTH, gu.HEIGHT)
+
+
+def draw_icon(code, frame=0):
+    """10x11 animated icon in the left part of the matrix."""
     kind = _kind(code)
     if kind == "sun":
         d.set_pen(d.create_pen(255, 200, 0))
-        d.rectangle(3, 4, 4, 4)
-        for x, y in ((5, 1), (5, 9), (1, 6), (9, 6), (2, 3), (8, 3), (2, 9), (8, 9)):
+        d.rectangle(3, 4, 4, 4)  # core
+        rays = ((5, 1), (5, 9), (1, 6), (9, 6), (2, 3), (8, 3), (2, 9), (8, 9))
+        for i, (x, y) in enumerate(rays):
+            # twinkle: alternate rays dim/bright
+            d.set_pen(d.create_pen(255, 200 if (i + frame) % 2 == 0 else 60, 0))
             d.pixel(x, y)
         return
     d.set_pen(d.create_pen(160, 160, 170))
-    d.rectangle(1, 5, 8, 3)
-    d.rectangle(3, 3, 4, 2)
+    d.rectangle(1, 4, 8, 4)   # cloud body
+    d.rectangle(3, 2, 4, 2)   # puff
     if kind == "rain":
         d.set_pen(d.create_pen(60, 120, 255))
-        for x, y in ((2, 9), (5, 9), (7, 9)):
-            d.pixel(x, y)
+        for x in (2, 5, 8):
+            d.pixel(x, 8 + (frame + x) % 3)  # drops fall
     elif kind == "snow":
         d.set_pen(d.create_pen(255, 255, 255))
-        for x, y in ((2, 9), (4, 8), (6, 9), (8, 8)):
-            d.pixel(x, y)
+        for x in (2, 4, 6, 8):
+            d.pixel(x, 8 + (frame + x) % 3)
     elif kind == "storm":
-        d.set_pen(d.create_pen(255, 230, 0))
-        for x, y in ((5, 8), (4, 9), (5, 10)):
-            d.pixel(x, y)
+        if frame % 2 == 0:
+            d.set_pen(d.create_pen(255, 230, 0))
+            for x, y in ((5, 8), (4, 9), (5, 10)):
+                d.pixel(x, y)
 
 
-def show_static(wx, seconds):
+def show_weather(wx, seconds):
     temp = round(wx["current"]["temperature_2m"])
     end = time.time() + seconds
     while time.time() < end:
-        d.set_pen(d.create_pen(0, 0, 0))
-        d.rectangle(0, 0, gu.WIDTH, gu.HEIGHT)
-        draw_icon(wx["current"]["weather_code"])
+        _clear()
+        draw_icon(wx["current"]["weather_code"], frame=int(time.time() * 3) % 4)
         d.set_pen(d.create_pen(255, 255, 255))
-        d.text("%dC" % temp, 11, 2, scale=1)
+        d.text("%dC" % temp, 13, 2, scale=1)
+        gu.update(d)
+        time.sleep(0.15)
+
+
+def show_clock(seconds):
+    colon_adv = 3  # reserved px for the colon, keeps layout stable
+    end = time.time() + seconds
+    while time.time() < end:
+        t = time.localtime()
+        hh = "%02d" % t[3]
+        mm = "%02d" % t[4]
+        w = d.measure_text(hh, 1) + colon_adv + d.measure_text(mm, 1)
+        x = (gu.WIDTH - w) // 2
+        _clear()
+        d.set_pen(d.create_pen(120, 200, 255))
+        d.text(hh, x, 2, scale=1)
+        if time.ticks_ms() % 1000 < 500:  # 1 Hz blink (time.time() is int here!), two pixels
+            cx = x + d.measure_text(hh, 1) + 1
+            d.pixel(cx, 4)
+            d.pixel(cx, 7)
+        d.text(mm, x + d.measure_text(hh, 1) + colon_adv, 2, scale=1)
+        gu.update(d)
+        time.sleep(0.2)
+
+
+def _arrow(x, y, up):
+    if up:
+        pts = ((x, y), (x - 1, y + 1), (x, y + 1), (x + 1, y + 1))
+    else:
+        pts = ((x, y + 2), (x - 1, y + 1), (x, y + 1), (x + 1, y + 1))
+    for px, py in pts:
+        d.pixel(px, py)
+
+
+def show_hilo(wx, seconds):
+    hi = round(wx["daily"]["temperature_2m_max"][0])
+    lo = round(wx["daily"]["temperature_2m_min"][0])
+    end = time.time() + seconds
+    while time.time() < end:
+        _clear()
+        d.set_pen(d.create_pen(255, 90, 60))
+        _arrow(6, 3, True)
+        d.text("%d" % hi, 12, 2, scale=1)
+        d.set_pen(d.create_pen(90, 140, 255))
+        _arrow(30, 3, False)
+        d.text("%d" % lo, 36, 2, scale=1)
         gu.update(d)
         time.sleep(0.2)
 
@@ -117,8 +172,7 @@ def show_static(wx, seconds):
 def show_text(msg, seconds):
     end = time.time() + seconds
     while time.time() < end:
-        d.set_pen(d.create_pen(0, 0, 0))
-        d.rectangle(0, 0, gu.WIDTH, gu.HEIGHT)
+        _clear()
         d.set_pen(d.create_pen(255, 160, 40))
         d.text(msg, 4, 2, scale=1)
         gu.update(d)
@@ -140,11 +194,10 @@ def main():
             except Exception as e:
                 print("weather fetch failed:", e)
                 wx = None
+        show_clock(5)
         if wx is not None:
-            show_static(wx, 5)
-            hi = round(wx["daily"]["temperature_2m_max"][0])
-            lo = round(wx["daily"]["temperature_2m_min"][0])
-            show_text("H%d L%d" % (hi, lo), 5)
+            show_weather(wx, 5)
+            show_hilo(wx, 5)
         else:
             show_text("no weather", 5)
 
