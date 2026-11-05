@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Display on the Galactic Unicorn via MicroPython (through scripts/mp.py).
+"""Display on the Galactic Unicorn via MicroPython (through mpremote).
 
 Usage:
     python3 skills/display/display.py                  # orange dots flying around
@@ -7,12 +7,12 @@ Usage:
     python3 skills/display/display.py --logo           # static Mistral logo (brand gradient)
     python3 skills/display/display.py --stop           # interrupt animation and clear
 
-The animation loop runs in the board's main REPL thread, so any later mp.py
+The animation loop runs in the board's main REPL thread, so any later mpremote
 call interrupts it with Ctrl-C (that is also what --stop does).
 """
 import argparse
-import os
-import sys
+import subprocess
+import tempfile
 
 ANIM = """from galactic import GalacticUnicorn
 from picographics import PicoGraphics, DISPLAY_GALACTIC_UNICORN
@@ -76,11 +76,16 @@ GalacticUnicorn().clear()
 """
 
 
-def run(code, port, timeout=10):
-    here = os.path.dirname(os.path.abspath(__file__))
-    sys.path.insert(0, os.path.abspath(os.path.join(here, "..", "..", "scripts")))
-    import mp
-    mp.run_code(code, port=port, timeout=timeout)
+def run(code, timeout=10):
+    # NamedTemporaryFile is deleted on close; on Linux the subprocess can
+    # read the path while the file is still open.
+    with tempfile.NamedTemporaryFile("w", suffix=".py") as f:
+        f.write(code)
+        f.flush()
+        try:
+            subprocess.run(["mpremote", "run", f.name], timeout=timeout)
+        except subprocess.TimeoutExpired:
+            pass  # the animation loops forever on the board; that is expected
 
 
 def main():
@@ -88,18 +93,17 @@ def main():
     ap.add_argument("--text", help="static text to show instead of the animation")
     ap.add_argument("--logo", action="store_true", help="show the Mistral logo")
     ap.add_argument("--stop", action="store_true", help="interrupt animation and clear")
-    ap.add_argument("--port", default="/dev/ttyACM0")
     args = ap.parse_args()
 
     if args.stop:
-        run(CLEAR, args.port)
+        run(CLEAR)
     elif args.logo:
-        run(LOGO, args.port)
+        run(LOGO)
     elif args.text is not None:
-        run(TEXT % args.text, args.port)
+        run(TEXT % args.text)
     else:
-        # animation never prints a prompt; a short timeout is enough to hand it over
-        run(ANIM, args.port, timeout=3)
+        # animation never returns to the prompt; a short timeout hands it over
+        run(ANIM, timeout=3)
     return 0
 
 

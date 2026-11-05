@@ -5,7 +5,7 @@ description: Make the Galactic Unicorn (Pico W) available in WSL2 via usbipd whe
 
 # Board attach / recovery
 
-Use when `/dev/ttyACM0` is missing or `scripts/mp.py exec` gets no response.
+Use when `/dev/ttyACM0` is missing or `mpremote exec` gets no response.
 
 1. List host USB devices: `usbipd.exe list`
 2. Find the board by VID:PID:
@@ -17,6 +17,6 @@ Use when `/dev/ttyACM0` is missing or `scripts/mp.py exec` gets no response.
 3. Attach to WSL: `usbipd.exe attach --wsl --busid <busid>` -> `/dev/ttyACM0`
    - "Device is not shared" -> operator runs `usbipd bind --busid <busid>`
      as admin on Windows first
-4. Verify: `python3 scripts/mp.py exec "print('ok')"`
-5. REPL still silent -> `python3 scripts/mp.py exec "import machine; machine.reset()"`,
+4. Verify: `mpremote exec "print('ok')"`
+5. REPL still silent -> `mpremote exec "import machine; machine.reset()"`,
    wait ~5 s, re-attach if the port vanished, verify again

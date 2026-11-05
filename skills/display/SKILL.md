@@ -8,7 +8,7 @@ description: Display static content (text, Mistral logo) on the Pimoroni Galacti
 ## Prerequisites
 
 - Board attached to WSL (`scripts/attach.sh`, see README "Connect")
-- `pyserial` installed
+- `mpremote` installed (`apt install micropython-mpremote`)
 
 ## Usage
 
@@ -22,9 +22,8 @@ python3 skills/display/display.py --stop           # interrupt animation and cle
 ## How it works
 
 `display.py` in this folder builds a MicroPython snippet and runs it on the
-board via `scripts/mp.py` (`run_code`, paste mode over `/dev/ttyACM0`). The
-dots animation loops in the board's main thread; any later `mp.py` call
-interrupts it with Ctrl-C (that is how `--stop` works):
+board via `mpremote run`. The dots animation loops in the board's main thread;
+any later `mpremote` call interrupts it with Ctrl-C (that is how `--stop` works):
 
 ```python
 from galactic import GalacticUnicorn

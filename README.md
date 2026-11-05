@@ -5,7 +5,7 @@ Pimoroni Galactic Unicorn (53x11 LED matrix) on Raspberry Pi Pico W, running Mic
 ## Environment
 
 - Windows 11 host + WSL2 (Ubuntu-24.04); repo: `/home/adam/dev/galactic-unicorn`
-- Board on host USB bus 2-2; usbipd: `usbipd.exe`
+- Board on host USB bus 2-2; usbipd: `usbipd.exe`; `mpremote` (apt install micropython-mpremote)
 - Firmware: MicroPython v1.29.0 board build `pico_w_galactic-v1.29.0-micropython.uf2`
   from https://github.com/pimoroni/unicorn/releases/tag/v1.29.0
 
@@ -16,7 +16,7 @@ Pimoroni Galactic Unicorn (53x11 LED matrix) on Raspberry Pi Pico W, running Mic
 usbipd bind --busid 2-2
 # from WSL:
 usbipd.exe attach --wsl --busid 2-2   # -> /dev/ttyACM0
-python3 scripts/mp.py exec "import os; print(os.uname().version)"
+mpremote exec "import os; print(os.uname().version)"
 ```
 
 ## Board API
@@ -33,4 +33,5 @@ gu.update(d)
 
 ## Layout
 
-- `scripts/` — attach.sh, mp.py
+- `scripts/` — attach.sh
+- `main.py` — board autostart (deploy: `mpremote cp main.py :main.py`)

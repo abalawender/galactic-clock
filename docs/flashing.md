@@ -5,11 +5,11 @@ Keep a local copy in `firmware/` (gitignored).
 
 ## Steps
 
-1. `python3 scripts/mp.py exec "import machine; machine.bootloader()"` — board
+1. `mpremote exec "import machine; machine.bootloader()"` — board
    re-enumerates as RP2 Boot (`2e8a:0003`); Windows mounts `RPI-RP2` at `E:`.
 2. `cp firmware/*.uf2 /mnt/e/` — bootloader flashes and reboots by itself.
 3. `scripts/attach.sh` — re-attach serial; verify:
-   `python3 scripts/mp.py exec "import os; print(os.uname().version)"`.
+   `mpremote exec "import os; print(os.uname().version)"`.
 
 ## Gotchas (observed)
 
