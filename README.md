@@ -34,4 +34,4 @@ gu.update(d)
 ## Layout
 
 - `scripts/` — attach.sh
-- `main.py` — board autostart (deploy: `mpremote cp main.py :main.py`)
+- `main.py` — weather clock: open-meteo forecast on the matrix (deploy: `mpremote cp main.py :main.py`)

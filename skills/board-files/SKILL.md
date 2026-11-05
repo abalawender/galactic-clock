@@ -13,8 +13,9 @@ Prerequisite: board attached to WSL2 (see `skills/board`). Use `mpremote`:
 - upload:    `mpremote cp local.py :main.py`
 - download:  `mpremote cp :main.py local.py`
 
-Files on the flash: `/main.py` (autostart), `/secrets.py` (WiFi credentials,
-gitignored — never read or print its contents). The rest of the "default"
+Files on the flash: `/main.py` (autostart), `/secrets.py` (WiFi credentials
+and location — gitignored, never read or print its contents).
+The rest of the "default"
 Python is frozen into the firmware image (visible via `help('modules')` on
 the board), not files.
 
