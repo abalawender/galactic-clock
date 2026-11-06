@@ -23,6 +23,11 @@ from galactic import GalacticUnicorn
 from picographics import PicoGraphics, DISPLAY_GALACTIC_UNICORN
 from secrets import LOCATION_LAT, LOCATION_LON, TZ, WIFI_PASSWORD, WIFI_SSID
 
+try:
+    from secrets import SCD41_ALTITUDE_M  # optional; 0 = no pressure compensation
+except ImportError:
+    SCD41_ALTITUDE_M = 0
+
 import render
 
 WX_URL = "https://api.open-meteo.com/v1/forecast"
@@ -32,7 +37,6 @@ REFRESH_S = 600
 I2C_SDA_PIN = 4
 I2C_SCL_PIN = 5
 SCD41_ADDR = 0x62
-SCD41_ALTITUDE_M = 470  # pressure compensation for CO2 readings
 
 gu = GalacticUnicorn()
 d = PicoGraphics(display=DISPLAY_GALACTIC_UNICORN)

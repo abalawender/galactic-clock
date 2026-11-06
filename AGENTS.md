@@ -6,8 +6,8 @@ hi/lo screen.
 
 ## Golden rules
 
-- **Never read, print, or commit `secrets.py`** (WiFi credentials, location).
-  It is gitignored; the board holds the only copy.
+- **Never read, print, or commit `secrets.py`** (WiFi credentials, location,
+  `SCD41_ALTITUDE_M`). It is gitignored; the board holds the only copy.
 - Board code must stay MicroPython-compatible: no CPython-only stdlib, match
   the existing `%`-formatting style, keep `src/render.py` free of board imports
   (it also runs on the host in `sim/`).

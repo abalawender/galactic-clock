@@ -164,6 +164,7 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     secrets = types.ModuleType("secrets")
     for k in ("LOCATION_LAT", "LOCATION_LON", "TZ", "WIFI_PASSWORD", "WIFI_SSID"):
         setattr(secrets, k, "mock")
+    secrets.SCD41_ALTITUDE_M = 470  # canned, like the other secrets
 
     pimoroni_i2c = types.ModuleType("pimoroni_i2c")
     pimoroni_i2c.PimoroniI2C = FakePimoroniI2C
