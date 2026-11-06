@@ -29,6 +29,7 @@ except ImportError:
     SCD41_ALTITUDE_M = 0
 
 import render
+import tz
 
 WX_URL = "https://api.open-meteo.com/v1/forecast"
 REFRESH_S = 600
@@ -103,7 +104,8 @@ def show_weather(wx, seconds):
 def show_clock(seconds):
     end = time.time() + seconds
     while time.time() < end:
-        t = time.localtime()
+        # localtime() is UTC on this build — apply the TZ offset ourselves
+        t = time.localtime(time.time() + tz.utc_offset(TZ, time.time()))
         # 1 Hz blink from ticks_ms (time.time() is int on this build)
         render.clear(d, W, H)
         render.draw_clock(d, W, H, "%02d" % t[3], "%02d" % t[4],
