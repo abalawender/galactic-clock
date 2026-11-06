@@ -114,6 +114,8 @@ def make_screen_fn(args):
         return lambda d, f: render.draw_clock(d, W, H, "21", "%02d" % (f % 60), f % 2 == 0)
     if args.screen == "hilo":
         return lambda d, f: render.draw_hilo(d, W, H, "%d" % args.hi, "%d" % args.lo)
+    if args.screen == "co2":
+        return lambda d, f: render.draw_co2(d, W, H, args.ppm)
     if args.screen == "message":
         return lambda d, f: render.draw_message(d, W, H, args.message)
     raise SystemExit("unknown screen: %s" % args.screen)
@@ -133,11 +135,12 @@ def main():
                     help="play: animate in terminal; print: plain ASCII frames "
                          "to stdout (no escape codes)")
     ap.add_argument("--screen", default="weather",
-                    choices=["weather", "clock", "hilo", "message"])
+                    choices=["weather", "clock", "hilo", "co2", "message"])
     ap.add_argument("--code", type=int, default=61, help="WMO weather code (weather screen)")
     ap.add_argument("--temp", type=int, default=21, help="current temperature C")
     ap.add_argument("--hi", type=int, default=25)
     ap.add_argument("--lo", type=int, default=18)
+    ap.add_argument("--ppm", type=int, default=812, help="CO2 ppm (co2 screen)")
     ap.add_argument("--message", default="no weather")
     ap.add_argument("--frames", type=int, default=12)
     ap.add_argument("--delay", type=float, default=0.15, help="seconds per frame in play mode")

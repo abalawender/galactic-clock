@@ -180,6 +180,23 @@ class TestGolden(unittest.TestCase):
         self.assertEqual(ascii_of(fb), GOLDEN_CLOCK)
 
 
+class TestCO2(unittest.TestCase):
+    """SCD41 CO2 screen: centered, color encodes indoor air quality."""
+
+    def test_co2_centered(self):
+        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812))
+        lo, hi = margins(fb)
+        self.assertEqual(lo, hi, "co2 off-center: %s" % ((lo, hi),))
+
+    def test_co2_color_buckets(self):
+        for ppm, want in ((700, render.CO2_OK), (900, render.CO2_WARN),
+                          (1300, render.CO2_BAD)):
+            fb = frame(lambda d, f: render.draw_co2(d, W, H, ppm))
+            lit = {p for row in fb for p in row if p != (0, 0, 0)}
+            self.assertEqual(lit, {want}, "ppm %d -> %s, want %s"
+                             % (ppm, lit, want))
+
+
 class TestRunMainMocked(unittest.TestCase):
     """The real main.py under full mocks (hardware/internet/time stubbed)."""
 
@@ -203,6 +220,11 @@ class TestRunMainMocked(unittest.TestCase):
         frames = run_main.run_at("HEAD", 6.0)
         self.assertIsNotNone(frames)
         self.assertGreater(len(frames), 20)
+
+    def test_rotation_includes_co2(self):
+        # the mocked SCD41 (machine.I2C stub) must make the co2 screen appear
+        frames = run_main.run_screen_current("draw_co2", 25.0)
+        self.assertTrue(frames, "co2 screen never appeared in the rotation")
 
 
 if __name__ == "__main__":
