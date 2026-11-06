@@ -2,8 +2,9 @@ name: sim-before-after
 
 # For PRs to micropython: render before/after GIFs of the display screens with
 # the host simulator (sim/before_after.py) and publish them as a build
-# artifact. Nothing is committed to git — download the `sim-before-after`
-# artifact from the workflow run (linked in the auto-comment on the PR).
+# artifact and as per-run assets of a hidden prerelease (names carry the run
+# id, so uploads never clobber and no previous version is ever lost).
+# Nothing is committed to git.
 
 on:
   pull_request:
@@ -11,7 +12,8 @@ on:
     paths: [main.py, src/**, sim/**, tests/**]
 
 permissions:
-  contents: read
+  contents: write      # release assets (inline GIFs in the PR comment)
+  issues: write
   pull-requests: write
 
 jobs:
@@ -45,13 +47,46 @@ jobs:
           path: /tmp/pr_*.gif
           retention-days: 14
 
-      - uses: actions/github-script@v7
-        with:
-          script: |
-            const base = '${{ github.event.pull_request.base.sha }}'.slice(0, 7);
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `Sim before/after GIFs (base \`${base}\` vs this PR): download the \`sim-before-after\` artifact from [this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).\n\nFiles: \`pr_<screen>_{before,after,compare}.gif\` per screen (compare = stacked, before on top; missing \`before\` = base ref could not render that screen). ASCII frames for one screen are in the job log above.`
-            })
+      # Upload the *_compare.gif files as assets of a hidden prerelease via the
+      # gh CLI (reference implementation of the upload protocol), then comment
+      # on the PR with inline ![...](browser_download_url) embeds — release
+      # asset images render directly in PR comments.
+      #
+      # Each GIF is uploaded once, under a per-run name carrying the run id
+      # (run ids are unique, so nothing is ever clobbered — every version is
+      # kept). The PR comment embeds exactly this run's assets. Old copies are
+      # pruned to the newest 40 (10 runs x 4 screens).
+      - name: comment before/after GIFs inline on the PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create pr-sim-assets --prerelease --title pr-sim-assets \
+            --notes 'hidden asset store for pr-sim inline GIFs' --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          # the tag was auto-created on the default branch (main) by the first
+          # `gh release create`; retarget it to the PR base so the release's
+          # auto-generated source archive is not stale main-branch code
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/pr-sim-assets" \
+            -f sha="${{ github.event.pull_request.base.sha }}" -F force=true > /dev/null
+          RUN_TAG="r${{ github.run_id }}"
+          for f in /tmp/pr_*_compare.gif; do
+            base=$(basename "$f")
+            cp "$f" "/tmp/${base%.gif}_${RUN_TAG}.gif"
+            gh release upload pr-sim-assets "/tmp/${base%.gif}_${RUN_TAG}.gif" --repo "$GITHUB_REPOSITORY"
+          done
+          # prune archived copies: keep the newest 40 (run ids sort numerically)
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/pr-sim-assets" \
+            --jq '.assets[] | select(.name | test("_r[0-9]+\\.gif$")) | "\(.name)"' \
+            | sed -E 's/^(.*)_r([0-9]+)\.gif$/\2 \1/' | sort -rn | awk 'NR > 40 {print $2}' \
+            | while read -r name; do
+                aid=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/pr-sim-assets" \
+                  --jq --arg n "$name" '.assets[] | select(.name == $n) | .id')
+                gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$aid" > /dev/null
+              done
+          {
+            echo "Sim before/after (base \`${{ github.event.pull_request.base.sha }}\` vs this PR), inline:"
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/pr-sim-assets" \
+              --jq '.assets[] | select(.name | test("_r${{ github.run_id }}\\.gif$")) | "\n\n**\(.name)** (before on top, after below)\n\n![\(.name)](\(.browser_download_url))"'
+            echo
+            echo "All per-screen before/after files are also in the \`sim-before-after\` artifact of [this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). These per-run GIFs (\`*_r<run_id>.gif\`, newest 40 kept) are archived on the [pr-sim-assets release](${{ github.server_url }}/${{ github.repository }}/releases/tag/pr-sim-assets). ASCII frames for one screen are in the job log above."
+          } > /tmp/comment.md
+          gh pr comment "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
