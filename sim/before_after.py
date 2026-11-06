@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Record before/after GIFs of a screen: old code from a git ref vs current tree.
+"""Record before/after GIFs of display screens: a git ref vs the current tree.
 
-The "before" side executes the actual main.py from `--ref` with the board
-modules (galactic, picographics, secrets, network, time, ...) stubbed out,
-capturing every gu.update() frame on a SimGraphics. The "after" side renders
-the current src/render.py. Writes <out>_before.gif, <out>_after.gif and a
-stacked <out>_compare.gif (before on top, after below).
+"before" loads src/render.py from --ref via `git show` and drives the same
+SCREENS table as the current tree — src/render.py is the stable seam across
+refactors. Screens the base ref cannot render are skipped with a note instead
+of failing, so this keeps working when screens change significantly. For refs
+without src/render.py, per-screen before is skipped, but the "rotation"
+pseudo-screen still compares by running that ref's real main.py fully mocked
+(sim/run_main.py).
 
-    python3 sim/before_after.py --ref 25a412a --screen clock --seconds 6 --out frames/clock
-    python3 sim/before_after.py --ref 25a412a --screen weather --code 61 --temp 21 \
-        --frames 16 --out frames/rain
+    python3 sim/before_after.py --ref main --out /tmp/pr
+    # writes /tmp/pr_<screen>_{after,before,compare}.gif  (before/compare only
+    # when the base ref can render that screen)
+
+Screens live in SCREENS below; each entry maps a name to a draw_* call and a
+frame count. Weather values are samples — the sim never reads secrets.py.
 """
 import argparse
 import os
@@ -22,90 +27,51 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "src"))
 sys.path.insert(0, HERE)
 
-import render  # noqa: E402
+import render  # noqa: E402  (current tree)
+import run_main  # noqa: E402
 import sim as simmod  # noqa: E402
 from gif import write_gif  # noqa: E402
 
 W, H = 53, 11
 
-
-def load_old_main(ref):
-    """Exec main.py from git ref `ref` with stubbed board modules."""
-    src = subprocess.run(["git", "show", "%s:main.py" % ref], cwd=REPO,
-                         capture_output=True, text=True, check=True).stdout
-    state = {"t": 1700000000.0, "ms": 0}
-
-    fake_time = types.ModuleType("time")
-    fake_time.time = lambda: state["t"]
-    fake_time.ticks_ms = lambda: state["ms"]
-
-    def _sleep(s):
-        state["t"] += s
-        state["ms"] += int(s * 1000)
-
-    fake_time.sleep = _sleep
-    fake_time.localtime = lambda: (2024, 11, 5, 21, 7, 0, 1, 309, 0)
-
-    class FakeGu:
-        WIDTH, HEIGHT = W, H
-
-        def __init__(self):
-            self.frames = []
-
-        def update(self, d):
-            self.frames.append([row[:] for row in d.fb])
-
-        def clear(self):
-            pass
-
-    galactic = types.ModuleType("galactic")
-    galactic.GalacticUnicorn = FakeGu
-    picographics = types.ModuleType("picographics")
-    picographics.DISPLAY_GALACTIC_UNICORN = 0
-    picographics.PicoGraphics = lambda display=0: simmod.SimGraphics(W, H)
-    secrets = types.ModuleType("secrets")
-    for k in ("LOCATION_LAT", "LOCATION_LON", "TZ", "WIFI_PASSWORD", "WIFI_SSID"):
-        setattr(secrets, k, "")
-    stubs = {"time": fake_time, "galactic": galactic,
-             "picographics": picographics, "secrets": secrets,
-             "network": types.ModuleType("network"),
-             "ntptime": types.ModuleType("ntptime"),
-             "urequests": types.ModuleType("urequests"),
-             "ujson": types.ModuleType("ujson")}
-    saved = {k: sys.modules.get(k) for k in stubs}
-    sys.modules.update(stubs)
-    try:
-        g = {"__name__": "old_main"}
-        exec(compile(src, "main.py@%s" % ref, "exec"), g)
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-    return g
+ROTATION_SECONDS = 18.0  # virtual seconds of the real main loop for "rotation"
 
 
-def old_frames(g, screen, args):
-    if screen == "clock":
-        g["show_clock"](args.seconds)
-    else:
-        wx = {"current": {"temperature_2m": float(args.temp),
-                          "weather_code": args.code}}
-        g["show_weather"](wx, args.frames * 0.15)
-    return g["gu"].frames
+def _weather(d, R, f):
+    R.draw_weather(d, W, H, 61, "21C", f)
 
 
-def new_frames(screen, args):
-    if screen == "clock":
-        n = int(args.seconds / 0.2)
-        return [simmod.render_frame(
-            lambda d, f: render.draw_clock(d, W, H, "21", "07",
-                                           (f * 200) % 1000 < 500), f)
-            for f in range(n)]
-    return [simmod.render_frame(
-        lambda d, f: render.draw_weather(d, W, H, args.code, "%dC" % args.temp, f), f)
-        for f in range(args.frames)]
+def _clock(d, R, f):
+    R.draw_clock(d, W, H, "21", "07", (f * 200) % 1000 < 500)
+
+
+def _hilo(d, R, f):
+    R.draw_hilo(d, W, H, "25", "18")
+
+
+SCREENS = {"weather": (_weather, 16), "clock": (_clock, 30), "hilo": (_hilo, 1)}
+
+
+def render_frames(R, screen, n):
+    fn = SCREENS[screen][0]
+    out = []
+    for f in range(n):
+        d = simmod.SimGraphics(W, H)
+        R.clear(d, W, H)
+        fn(d, R, f)
+        out.append(d.fb)
+    return out
+
+
+def load_render_at(ref):
+    """The src/render.py module as of git ref, or None if it did not exist."""
+    r = subprocess.run(["git", "show", "%s:src/render.py" % ref], cwd=REPO,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    mod = types.ModuleType("render_at_%s" % ref[:7])
+    exec(compile(r.stdout, "render.py@%s" % ref, "exec"), mod.__dict__)
+    return mod
 
 
 def stack(a, b):
@@ -119,35 +85,80 @@ def stack(a, b):
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--ref", default="25a412a", help="git ref for the 'before' code")
-    ap.add_argument("--screen", choices=["clock", "weather"], default="clock")
-    ap.add_argument("--code", type=int, default=61, help="WMO code (weather screen)")
-    ap.add_argument("--temp", type=int, default=21)
-    ap.add_argument("--seconds", type=float, default=6.0, help="clock: simulated seconds")
-    ap.add_argument("--frames", type=int, default=16, help="weather: frame count")
+    ap.add_argument("--ref", default="main", help="git ref for the 'before' side")
+    ap.add_argument("--screens", default=",".join(SCREENS) + ",rotation",
+                    help="comma-separated subset of: %s,rotation"
+                         % ",".join(SCREENS))
     ap.add_argument("--scale", type=int, default=8)
     ap.add_argument("--delay", type=float, default=0.2)
-    ap.add_argument("--out", required=True, help="output prefix, e.g. frames/clock")
+    ap.add_argument("--out", required=True, help="output prefix, e.g. /tmp/pr")
     args = ap.parse_args()
-
-    g = load_old_main(args.ref)
-    before = old_frames(g, args.screen, args)
-    after = new_frames(args.screen, args)
 
     outdir = os.path.dirname(args.out)
     if outdir:
         os.makedirs(outdir, exist_ok=True)
     delay_ms = int(args.delay * 1000)
-    write_gif(before, args.out + "_before.gif", scale=args.scale, delay_ms=delay_ms)
-    write_gif(after, args.out + "_after.gif", scale=args.scale, delay_ms=delay_ms)
-    labels = [(4, 4, "before @ %s" % args.ref),
-              (4, (H + 1) * args.scale + 4, "after @ HEAD")]
-    write_gif(stack(before, after), args.out + "_compare.gif",
-              scale=args.scale, delay_ms=delay_ms, texts=labels)
-    print("before frames: %d, after frames: %d" % (len(before), len(after)))
-    print("wrote %s_{before,after,compare}.gif" % args.out)
-    if len(before) == len(after):
-        print("before == after pixel-identical:", before == after)
+
+    R_base = load_render_at(args.ref)
+    if R_base is None:
+        print("note: no src/render.py at %s — per-screen before skipped; "
+              "rotation (mocked main.py) still compares" % args.ref)
+
+    for screen in args.screens.split(","):
+        if screen == "rotation":
+            # whole main-loop run with hardware/internet/time mocked — robust
+            # to any screen changes, since nothing app-level is hard-coded
+            after = run_main.run_current(ROTATION_SECONDS)
+            write_gif(after, "%s_rotation_after.gif" % args.out,
+                      scale=args.scale, delay_ms=delay_ms)
+            before = None
+            try:
+                before = run_main.run_at(args.ref, ROTATION_SECONDS)
+            except Exception as e:
+                print("rotation: before failed at %s (%s) — after-only"
+                      % (args.ref, e))
+            if before is not None:
+                m = min(len(before), len(after))
+                before = before[:m]
+                write_gif(before, "%s_rotation_before.gif" % args.out,
+                          scale=args.scale, delay_ms=delay_ms)
+                labels = [(4, 4, "before @ %s" % args.ref),
+                          (4, (H + 1) * args.scale + 4, "after @ HEAD")]
+                write_gif(stack(before, after[:m]),
+                          "%s_rotation_compare.gif" % args.out,
+                          scale=args.scale, delay_ms=delay_ms, texts=labels)
+                print("rotation: compared %d vs %d frames, pixel-identical=%s"
+                      % (m, len(after), before == after[:m]))
+            else:
+                print("rotation: after-only (%d frames)" % len(after))
+            continue
+        if screen not in SCREENS:
+            raise SystemExit("unknown screen: %s (have: %s,rotation)"
+                             % (screen, ",".join(SCREENS)))
+        n = SCREENS[screen][1]
+        after = render_frames(render, screen, n)
+        write_gif(after, "%s_%s_after.gif" % (args.out, screen),
+                  scale=args.scale, delay_ms=delay_ms)
+        before = None
+        if R_base is not None:
+            try:
+                before = render_frames(R_base, screen, n)
+            except Exception as e:
+                print("%s: before unavailable at %s (%s) — after-only"
+                      % (screen, args.ref, e))
+        if before is not None:
+            write_gif(before, "%s_%s_before.gif" % (args.out, screen),
+                      scale=args.scale, delay_ms=delay_ms)
+            labels = [(4, 4, "before @ %s" % args.ref),
+                      (4, (H + 1) * args.scale + 4, "after @ HEAD")]
+            write_gif(stack(before, after),
+                      "%s_%s_compare.gif" % (args.out, screen),
+                      scale=args.scale, delay_ms=delay_ms, texts=labels)
+            same = (len(before) == len(after) and before == after)
+            print("%s: compared %d vs %d frames, pixel-identical=%s"
+                  % (screen, len(before), len(after), same))
+        else:
+            print("%s: after-only (%d frames)" % (screen, len(after)))
     return 0
 
 
