@@ -75,9 +75,14 @@ def show_weather(wx, seconds):
     code = wx["current"]["weather_code"]
     temp = "%dC" % round(wx["current"]["temperature_2m"])
     end = time.time() + seconds
+    frame = 0
     while time.time() < end:
         render.clear(d, W, H)
-        render.draw_weather(d, W, H, code, temp, int(time.time() * 3))
+        # frame must advance by exactly 1 per shown frame: time.time() is int
+        # seconds on this build, so int(time.time()*3) jumps 0,3,6,9... and
+        # the drops appear to fall upwards
+        render.draw_weather(d, W, H, code, temp, frame)
+        frame += 1
         gu.update(d)
         time.sleep(0.15)
 
