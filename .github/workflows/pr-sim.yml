@@ -1,0 +1,57 @@
+name: sim-before-after
+
+# For PRs to micropython: render before/after GIFs of the display screens with
+# the host simulator (sim/before_after.py) and publish them as a build
+# artifact. Nothing is committed to git — download the `sim-before-after`
+# artifact from the workflow run (linked in the auto-comment on the PR).
+
+on:
+  pull_request:
+    branches: [micropython]
+    paths: [main.py, src/**, sim/**, tests/**]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gifs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need the base sha for `git show <base>:main.py`
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pillow
+
+      - name: unit tests (rendered-bitmap + golden ASCII + mocked main loop)
+        run: python3 -m unittest discover -s tests -v
+
+      # a few ASCII frames straight into the job log, no download needed
+      - name: ascii preview in the log
+        run: python3 sim/sim.py print --screen weather --code 61 --temp 21 --frames 4
+
+      - name: render before/after GIFs (base vs PR head)
+        # screens the base ref cannot render are skipped with a note (after-only)
+        run: python3 sim/before_after.py --ref "${{ github.event.pull_request.base.sha }}" --out /tmp/pr
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sim-before-after
+          path: /tmp/pr_*.gif
+          retention-days: 14
+
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const base = '${{ github.event.pull_request.base.sha }}'.slice(0, 7);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Sim before/after GIFs (base \`${base}\` vs this PR): download the \`sim-before-after\` artifact from [this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).\n\nFiles: \`pr_<screen>_{before,after,compare}.gif\` per screen (compare = stacked, before on top; missing \`before\` = base ref could not render that screen). ASCII frames for one screen are in the job log above.`
+            })

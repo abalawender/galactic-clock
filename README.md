@@ -50,9 +50,18 @@ Recordings are generated on demand and never committed (gitignored):
 
 ```
 python3 sim/sim.py play --screen weather --code 61 --frames 16 --gif /tmp/rain.gif
-python3 sim/before_after.py --ref main --screen weather --code 61 --out /tmp/pr_rain
-                              # writes /tmp/pr_rain_{before,after,compare}.gif — attach to the PR
+python3 sim/before_after.py --ref main --out /tmp/pr
+                              # writes /tmp/pr_<screen>_{before,after,compare}.gif per screen
+                              # (weather/clock/hilo) plus pr_rotation_* — a full mocked run of
+                              # the real main.py (sim/run_main.py), robust to screen changes.
+                              # Attach the GIFs to the PR; CI does this automatically.
 ```
+
+PRs to `micropython` that touch `main.py`/`src/`/`sim/`/`tests/` automatically
+run the unit tests (`python3 -m unittest discover -s tests -v` — rendered
+bitmap checks, golden ASCII dumps, mocked full run of the real `main.py`) and
+get before/after GIFs (base ref vs PR head) as a `sim-before-after` workflow
+artifact — see `.github/workflows/pr-sim.yml`; a bot comment links the run.
 
 ## Layout
 
