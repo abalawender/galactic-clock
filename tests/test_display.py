@@ -151,6 +151,19 @@ GOLDEN_HILO = (
     '                                                     \n'
     '                                                     '
 )
+GOLDEN_CO2 = (
+    '                                                     \n'
+    '                                                     \n'
+    '                                                     \n'
+    '           ***  **** ***       **** ** ***           \n'
+    '          *    *   *    *     *   *  *    *          \n'
+    '          *    *   *  **       ***   *  **           \n'
+    '          *    *   * *        *   *  * *             \n'
+    '           ***  ***  ****      ***   * ****          \n'
+    '                                                     \n'
+    '                                                     \n'
+    '                                                     '
+)
 GOLDEN_CLOCK = (
     '                                                     \n'
     '                                                     \n'
@@ -178,6 +191,10 @@ class TestGolden(unittest.TestCase):
     def test_clock_blink_on(self):
         fb = frame(lambda d, f: render.draw_clock(d, W, H, "21", "07", True))
         self.assertEqual(ascii_of(fb), GOLDEN_CLOCK)
+
+    def test_co2(self):
+        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812))
+        self.assertEqual(ascii_of(fb), GOLDEN_CO2)
 
 
 class TestCO2(unittest.TestCase):
@@ -222,9 +239,13 @@ class TestRunMainMocked(unittest.TestCase):
         self.assertGreater(len(frames), 20)
 
     def test_rotation_includes_co2(self):
-        # the mocked SCD41 (machine.I2C stub) must make the co2 screen appear
+        # the mocked SCD41 must make the co2 screen appear in the rotation
         frames = run_main.run_screen_current("draw_co2", 25.0)
         self.assertTrue(frames, "co2 screen never appeared in the rotation")
+
+    def test_scd41_altitude_configured(self):
+        run_main.run_current(2.0)
+        self.assertEqual(run_main.FakeSCD41.last.altitude_m, 470)
 
 
 if __name__ == "__main__":

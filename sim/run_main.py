@@ -2,7 +2,8 @@
 """Run the actual main.py fully mocked and capture what the matrix would show.
 
 Mocks sit at the hardware/internet/time boundary — galactic, picographics,
-network, ntptime, urequests, ujson, secrets, time, machine (I2C/SCD41) —
+network, ntptime, urequests, ujson, secrets, time, and the Pimoroni sensor
+modules (pimoroni_i2c, breakout_scd41, frozen into the board firmware) —
 which is stable, so the
 real app code (screens, rotation loop, state) from any git ref runs
 unchanged. Frames are captured from every gu.update(). If the ref has its own
@@ -44,18 +45,34 @@ CANNED_CO2 = 812  # ppm reported by the mocked SCD41
 SYNCED_EPOCH = 1793972928.0  # pretend NTP fixed the RTC to this
 
 
-def _crc8(data):
-    """Sensirion CRC-8 (poly 0x31, init 0xFF) — same as the SCD41 driver."""
-    crc = 0xFF
-    for b in data:
-        crc ^= b
-        for _ in range(8):
-            crc = ((crc << 1) ^ 0x31) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
-    return crc
+class FakePimoroniI2C:
+    def __init__(self, *a, **k):
+        pass
+
+    def scan(self):
+        return [0x62]  # SCD41 present
 
 
-def _word(value, scale, offset=0):
-    return int((value - offset) / scale * 65536).to_bytes(2, "big")
+class FakeSCD41:
+    """Canned SCD41: 812 ppm, 21.5 C, 45 %RH, always ready. Last instance is
+    kept on the class so tests can introspect what main.py configured."""
+    last = None
+
+    def __init__(self, i2c, address=0x62):
+        FakeSCD41.last = self
+        self.altitude_m = None
+
+    def start(self):
+        pass
+
+    def set_sensor_altitude(self, alt):
+        self.altitude_m = alt
+
+    def ready(self):
+        return True
+
+    def measure(self):
+        return CANNED_CO2, 21.5, 45.0
 
 
 class _Stop(Exception):
@@ -148,43 +165,16 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     for k in ("LOCATION_LAT", "LOCATION_LON", "TZ", "WIFI_PASSWORD", "WIFI_SSID"):
         setattr(secrets, k, "mock")
 
-    machine = types.ModuleType("machine")
-
-    class Pin:
-        def __init__(self, *a, **k):
-            pass
-
-    class FakeI2C:
-        """Canned SCD41 at 0x62: 812 ppm, 21.5 C, 45 %RH, always data-ready."""
-
-        def __init__(self, *a, **k):
-            self.last = b""
-
-        def scan(self):
-            return [0x62]
-
-        def writeto(self, addr, buf):
-            self.last = bytes(buf)
-            return len(buf)
-
-        def readfrom(self, addr, n):
-            if self.last == b"\xe4\xb8":  # get data ready
-                w = b"\x00\x01"
-                return w + bytes([_crc8(w)])
-            if self.last == b"\xec\x05":  # read measurement
-                words = [CANNED_CO2.to_bytes(2, "big"),
-                         _word(21.5, 175, -45), _word(45, 100)]
-                out = b"".join(w + bytes([_crc8(w)]) for w in words)
-                return out[:n]
-            return bytes(n)
-
-    machine.Pin = Pin
-    machine.I2C = FakeI2C
+    pimoroni_i2c = types.ModuleType("pimoroni_i2c")
+    pimoroni_i2c.PimoroniI2C = FakePimoroniI2C
+    breakout_scd41 = types.ModuleType("breakout_scd41")
+    breakout_scd41.BreakoutSCD41 = FakeSCD41
 
     stubs = {"time": fake_time, "galactic": galactic,
              "picographics": picographics, "secrets": secrets,
              "network": network, "ntptime": ntptime,
-             "urequests": urequests, "ujson": ujson, "machine": machine}
+             "urequests": urequests, "ujson": ujson,
+             "pimoroni_i2c": pimoroni_i2c, "breakout_scd41": breakout_scd41}
     rmod = _render
     if render_src is not None:
         rmod = types.ModuleType("render_at_ref")
