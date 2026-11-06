@@ -102,7 +102,8 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     # (jumps of 3 per second, which is what made rain appear to fall upwards)
     fake_time.time = lambda: int(state["t"])
     fake_time.ticks_ms = lambda: int(state["t"] * 1000) % (1 << 30)
-    fake_time.localtime = lambda: real_time.gmtime(state["t"])
+    fake_time.localtime = lambda t=None: real_time.gmtime(
+        state["t"] if t is None else t)
 
     def _sleep(s):
         if state["start"] is None:
@@ -165,6 +166,7 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     for k in ("LOCATION_LAT", "LOCATION_LON", "TZ", "WIFI_PASSWORD", "WIFI_SSID"):
         setattr(secrets, k, "mock")
     secrets.SCD41_ALTITUDE_M = 470  # canned, like the other secrets
+    secrets.TZ = "Europe/Warsaw"  # canned timezone, exercises tz.utc_offset
 
     pimoroni_i2c = types.ModuleType("pimoroni_i2c")
     pimoroni_i2c.PimoroniI2C = FakePimoroniI2C
