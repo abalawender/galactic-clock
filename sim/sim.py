@@ -16,8 +16,8 @@ Usage:
     python3 sim/sim.py play   --screen clock --frames 30 --gif /tmp/clock.gif
                                  # animated GIF (needs Pillow); generate for PRs,
                                  # never commit (gitignored)
-    python3 sim/before_after.py --ref main --screen clock --out /tmp/clock
-                                 # before/after/compare GIFs from a git ref
+    python3 sim/before_after.py --ref main --out /tmp/pr
+                                 # before/after/compare GIFs per screen, from a git ref
 
 Screens: weather (icon + temp), clock, hilo, message. --frames N renders N
 animation ticks (frame 0..N-1); --delay sets playback seconds per frame.

@@ -31,8 +31,8 @@ hi/lo screen.
   `python3 sim/sim.py play ...` animates in the terminal.
 - **Recordings are never committed** (`frames/`, `*.gif` gitignored). For a
   pull request, generate a GIF on demand and attach it, e.g.
-  `python3 sim/before_after.py --ref main --screen weather --code 61 --out /tmp/pr_rain`
-  → attach `/tmp/pr_rain_compare.gif` to the PR.
+  `python3 sim/before_after.py --ref main --out /tmp/pr`
+  → attach e.g. `/tmp/pr_weather_compare.gif` to the PR.
 
 ## Layout
 
