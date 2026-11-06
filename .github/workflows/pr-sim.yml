@@ -68,8 +68,13 @@ jobs:
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/pr-sim-assets" \
             -f sha="${{ github.event.pull_request.base.sha }}" -F force=true > /dev/null
           RUN_TAG="r${{ github.run_id }}"
-          for f in /tmp/pr_*_compare.gif; do
+          for f in /tmp/pr_*_compare.gif /tmp/pr_*_after.gif; do
             base=$(basename "$f")
+            # after-only screens (new at this PR, no base to compare) still
+            # get an embed; skip *_after.gif when a compare already covers it
+            case "$base" in
+              *_after.gif) [[ -f "/tmp/${base%_after.gif}_compare.gif" ]] && continue ;;
+            esac
             cp "$f" "/tmp/${base%.gif}_${RUN_TAG}.gif"
             gh release upload pr-sim-assets "/tmp/${base%.gif}_${RUN_TAG}.gif" --repo "$GITHUB_REPOSITORY"
           done
@@ -85,7 +90,7 @@ jobs:
           {
             echo "Sim before/after (base \`${{ github.event.pull_request.base.sha }}\` vs this PR), inline:"
             gh api "repos/$GITHUB_REPOSITORY/releases/tags/pr-sim-assets" \
-              --jq '.assets[] | select(.name | test("_r${{ github.run_id }}\\.gif$")) | "\n\n**\(.name)** (before on top, after below)\n\n![\(.name)](\(.browser_download_url))"'
+              --jq '.assets[] | select(.name | test("_r${{ github.run_id }}\\.gif$")) | "\n\n**\(.name)** \((if (.name | contains("compare")) then "before on top, after below" else "new at this PR — after only" end))\n\n![\(.name)](\(.browser_download_url))"'
             echo
             echo "All per-screen before/after files are also in the \`sim-before-after\` artifact of [this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). These per-run GIFs (\`*_r<run_id>.gif\`, newest 40 kept) are archived on the [pr-sim-assets release](${{ github.server_url }}/${{ github.repository }}/releases/tag/pr-sim-assets). ASCII frames for one screen are in the job log above."
           } > /tmp/comment.md
