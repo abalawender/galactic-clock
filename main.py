@@ -2,8 +2,9 @@
 
 Connects to WiFi (credentials in /secrets.py, not committed), syncs the RTC
 via NTP (clock on screen), fetches the forecast from open-meteo (no API key
-needed) and rotates three screens on the 53x11 matrix: clock, weather icon +
-temperature, high/low.
+needed), reads a local SCD41 CO2 sensor over I2C (breakout_scd41 is frozen
+into Pimoroni's MicroPython), and rotates the screens on the 53x11 matrix:
+clock, weather icon + temperature, high/low, CO2 ppm.
 
 All drawing lives in render.py (pure, board-independent) so it can also run in
 the host simulator: python3 sim/sim.py play --screen weather --code 61
@@ -15,6 +16,8 @@ import network
 import ntptime
 import urequests
 import ujson
+from breakout_scd41 import BreakoutSCD41  # frozen into Pimoroni's MicroPython
+from pimoroni_i2c import PimoroniI2C
 
 from galactic import GalacticUnicorn
 from picographics import PicoGraphics, DISPLAY_GALACTIC_UNICORN
@@ -24,6 +27,12 @@ import render
 
 WX_URL = "https://api.open-meteo.com/v1/forecast"
 REFRESH_S = 600
+
+# SCD41 on the STEMMA QT / Qwiic connector
+I2C_SDA_PIN = 4
+I2C_SCL_PIN = 5
+SCD41_ADDR = 0x62
+SCD41_ALTITUDE_M = 470  # pressure compensation for CO2 readings
 
 gu = GalacticUnicorn()
 d = PicoGraphics(display=DISPLAY_GALACTIC_UNICORN)
@@ -110,6 +119,15 @@ def show_hilo(wx, seconds):
         time.sleep(0.2)
 
 
+def show_co2(ppm, seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        render.clear(d, W, H)
+        render.draw_co2(d, W, H, ppm)
+        gu.update(d)
+        time.sleep(0.2)
+
+
 def show_text(msg, seconds):
     end = time.time() + seconds
     while time.time() < end:
@@ -121,6 +139,19 @@ def show_text(msg, seconds):
 
 def main():
     connect_wifi()
+    sensor = None
+    try:
+        i2c = PimoroniI2C(sda=I2C_SDA_PIN, scl=I2C_SCL_PIN)
+        if SCD41_ADDR in i2c.scan():
+            sensor = BreakoutSCD41(i2c)
+            sensor.start()
+            sensor.set_sensor_altitude(SCD41_ALTITUDE_M)
+            print("scd41: periodic measurement started, alt %dm"
+                  % SCD41_ALTITUDE_M)
+        else:
+            print("scd41: not found on i2c")
+    except Exception as e:
+        print("scd41 init failed:", e)
     wx = None
     last_fetch = 0.0
     while True:
@@ -140,6 +171,9 @@ def main():
             show_hilo(wx, 5)
         else:
             show_text("no weather", 5)
+        if sensor is not None and sensor.ready():
+            co2, _temp, _rh = sensor.measure()
+            show_co2(co2, 5)
 
 
 if __name__ == "__main__":

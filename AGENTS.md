@@ -11,6 +11,9 @@ hi/lo screen.
 - Board code must stay MicroPython-compatible: no CPython-only stdlib, match
   the existing `%`-formatting style, keep `src/render.py` free of board imports
   (it also runs on the host in `sim/`).
+- The SCD41 driver is frozen into Pimoroni's MicroPython firmware
+  (`breakout_scd41`, `pimoroni_i2c`) — do not vendor a copy; the sim mocks
+  those two modules (sim/run_main.py).
 - Deploy only `main.py` and `src/render.py` to the flash root.
 
 ## Workflow

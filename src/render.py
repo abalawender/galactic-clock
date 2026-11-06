@@ -20,6 +20,9 @@ HI = (255, 90, 60)
 LO = (90, 140, 255)
 CLOCK = (120, 200, 255)
 MSG = (255, 160, 40)
+CO2_OK = (80, 220, 80)    # < 800 ppm
+CO2_WARN = (255, 200, 0)  # < 1200 ppm
+CO2_BAD = (255, 60, 60)   # >= 1200 ppm
 
 TEXT_Y = 2
 
@@ -131,6 +134,23 @@ def draw_hilo(d, w, h, hi_text, lo_text):
     d.set_pen(d.create_pen(*LO))
     _arrow(d, x2 + 1, 3, False)
     d.text(lo_text, x2 + 3 + arrow_gap, TEXT_Y, scale=1)
+
+
+def draw_co2(d, w, h, ppm):
+    """CO2 reading in ppm as one centered text group, color-coded by level."""
+    text = "CO2 %d" % ppm
+    x = (w - d.measure_text(text, 1)) // 2
+    d.set_pen(d.create_pen(*co2_color(ppm)))
+    d.text(text, x, TEXT_Y, scale=1)
+
+
+def co2_color(ppm):
+    """Indoor air quality: green < 800 ppm, amber < 1200, red above."""
+    if ppm < 800:
+        return CO2_OK
+    if ppm < 1200:
+        return CO2_WARN
+    return CO2_BAD
 
 
 def draw_message(d, w, h, msg):
