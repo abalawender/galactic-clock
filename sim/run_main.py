@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.join(REPO, "src"))
 sys.path.insert(0, HERE)
 
 import sim as simmod  # noqa: E402
+import render as _render  # noqa: E402
 from gif import write_gif  # noqa: E402
 
 W, H = 53, 11
@@ -51,13 +52,22 @@ def _git_show(ref, path):
     return r.stdout if r.returncode == 0 else None
 
 
-def run_main_src(src, seconds, render_src=None):
-    """Exec one main.py source with all externals mocked; return frame list."""
+def run_main_src(src, seconds, render_src=None, capture_func=None,
+                 capture_out=None):
+    """Exec one main.py source with all externals mocked; return frame list.
+
+    If capture_func is given (e.g. "draw_weather"), every call of that
+    render.* function appends a copy of the bitmap to capture_out — i.e. the
+    exact screen the ref's own main.py drew, with its own frame argument.
+    """
     state = {"t": 1700000000.0, "start": None}
     real_time = sys.modules.get("time")
 
     fake_time = types.ModuleType("time")
-    fake_time.time = lambda: state["t"]
+    # this MicroPython build's time.time() returns int seconds — the mock must
+    # too, or int(time.time()*3) advances differently than on the real board
+    # (jumps of 3 per second, which is what made rain appear to fall upwards)
+    fake_time.time = lambda: int(state["t"])
     fake_time.ticks_ms = lambda: int(state["t"] * 1000) % (1 << 30)
     fake_time.localtime = lambda: real_time.gmtime(state["t"])
 
@@ -126,19 +136,32 @@ def run_main_src(src, seconds, render_src=None):
              "picographics": picographics, "secrets": secrets,
              "network": network, "ntptime": ntptime,
              "urequests": urequests, "ujson": ujson}
+    rmod = _render
     if render_src is not None:
         rmod = types.ModuleType("render_at_ref")
         exec(compile(render_src, "render.py@ref", "exec"), rmod.__dict__)
         stubs["render"] = rmod
+    orig = None
+    if capture_func is not None:
+        orig = getattr(rmod, capture_func, None)
+        if orig is not None:
+            def wrapper(d, *a, _orig=orig):
+                _orig(d, *a)
+                capture_out.append([row[:] for row in d.fb])
+            setattr(rmod, capture_func, wrapper)
 
     # patch.dict swaps the stub modules in and restores them atomically,
     # even if the app code raises
-    with mock.patch.dict(sys.modules, stubs):
-        g = {"__name__": "__main__"}
-        try:
-            exec(compile(src, "main.py", "exec"), g)
-        except _Stop:
-            pass
+    try:
+        with mock.patch.dict(sys.modules, stubs):
+            g = {"__name__": "__main__"}
+            try:
+                exec(compile(src, "main.py", "exec"), g)
+            except _Stop:
+                pass
+    finally:
+        if orig is not None:
+            setattr(rmod, capture_func, orig)
     # the app really did go through the mocked internet + RTC sync
     assert urequests.get.called, "main.py never fetched weather"
     assert ntptime.settime.called, "main.py never synced the RTC"
@@ -159,6 +182,29 @@ def run_current(seconds):
     with open(os.path.join(REPO, "main.py")) as fh:
         src = fh.read()
     return run_main_src(src, seconds)
+
+
+def run_screen_at(ref, func, seconds):
+    """Bitmaps of each render.<func> call while running ref's real main.py.
+
+    Returns None if the ref has no main.py or never called the function.
+    """
+    src = _git_show(ref, "main.py")
+    if src is None:
+        return None
+    out = []
+    run_main_src(src, seconds, render_src=_git_show(ref, "src/render.py"),
+                 capture_func=func, capture_out=out)
+    return out or None
+
+
+def run_screen_current(func, seconds):
+    """Same as run_screen_at but for the working tree."""
+    with open(os.path.join(REPO, "main.py")) as fh:
+        src = fh.read()
+    out = []
+    run_main_src(src, seconds, capture_func=func, capture_out=out)
+    return out or None
 
 
 def main():

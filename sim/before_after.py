@@ -9,6 +9,12 @@ without src/render.py, per-screen before is skipped, but the "rotation"
 pseudo-screen still compares by running that ref's real main.py fully mocked
 (sim/run_main.py).
 
+The weather screen is special: its animation phase comes from main.py's frame
+argument (on the board int(time.time()*3) with int seconds), not from
+render.py alone — so both sides are captured by running each side's real
+main.py mocked (run_main.run_screen_*) and recording every draw_weather call.
+Driving render.py with synthetic 0..n frames would hide device-only bugs.
+
     python3 sim/before_after.py --ref main --out /tmp/pr
     # writes /tmp/pr_<screen>_{after,before,compare}.gif  (before/compare only
     # when the base ref can render that screen)
@@ -37,10 +43,6 @@ W, H = 53, 11
 ROTATION_SECONDS = 18.0  # virtual seconds of the real main loop for "rotation"
 
 
-def _weather(d, R, f):
-    R.draw_weather(d, W, H, 61, "21C", f)
-
-
 def _clock(d, R, f):
     R.draw_clock(d, W, H, "21", "07", (f * 200) % 1000 < 500)
 
@@ -49,7 +51,12 @@ def _hilo(d, R, f):
     R.draw_hilo(d, W, H, "25", "18")
 
 
-SCREENS = {"weather": (_weather, 16), "clock": (_clock, 30), "hilo": (_hilo, 1)}
+SCREENS = {"clock": (_clock, 30), "hilo": (_hilo, 1)}
+
+# Weather goes through the real main loop on both sides (see module docstring).
+WEATHER_FUNC = "draw_weather"
+WEATHER_FRAMES = 16
+WEATHER_SECONDS = 9.0  # loop shows 5s clock first, then weather at 0.15s/frame
 
 
 def render_frames(R, screen, n):
@@ -86,8 +93,8 @@ def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ref", default="main", help="git ref for the 'before' side")
-    ap.add_argument("--screens", default=",".join(SCREENS) + ",rotation",
-                    help="comma-separated subset of: %s,rotation"
+    ap.add_argument("--screens", default="weather," + ",".join(SCREENS) + ",rotation",
+                    help="comma-separated subset of: weather,%s,rotation"
                          % ",".join(SCREENS))
     ap.add_argument("--scale", type=int, default=8)
     ap.add_argument("--delay", type=float, default=0.2)
@@ -132,20 +139,31 @@ def main():
             else:
                 print("rotation: after-only (%d frames)" % len(after))
             continue
-        if screen not in SCREENS:
-            raise SystemExit("unknown screen: %s (have: %s,rotation)"
+        before = None
+        if screen == "weather":
+            after = (run_main.run_screen_current(WEATHER_FUNC, WEATHER_SECONDS)
+                     or [])[:WEATHER_FRAMES]
+            try:
+                before = (run_main.run_screen_at(args.ref, WEATHER_FUNC,
+                                                 WEATHER_SECONDS)
+                          or [])[:WEATHER_FRAMES] or None
+            except Exception as e:
+                print("weather: before unavailable at %s (%s) — after-only"
+                      % (args.ref, e))
+        elif screen in SCREENS:
+            n = SCREENS[screen][1]
+            after = render_frames(render, screen, n)
+            if R_base is not None:
+                try:
+                    before = render_frames(R_base, screen, n)
+                except Exception as e:
+                    print("%s: before unavailable at %s (%s) — after-only"
+                          % (screen, args.ref, e))
+        else:
+            raise SystemExit("unknown screen: %s (have: weather,%s,rotation)"
                              % (screen, ",".join(SCREENS)))
-        n = SCREENS[screen][1]
-        after = render_frames(render, screen, n)
         write_gif(after, "%s_%s_after.gif" % (args.out, screen),
                   scale=args.scale, delay_ms=delay_ms)
-        before = None
-        if R_base is not None:
-            try:
-                before = render_frames(R_base, screen, n)
-            except Exception as e:
-                print("%s: before unavailable at %s (%s) — after-only"
-                      % (screen, args.ref, e))
         if before is not None:
             write_gif(before, "%s_%s_before.gif" % (args.out, screen),
                       scale=args.scale, delay_ms=delay_ms)
