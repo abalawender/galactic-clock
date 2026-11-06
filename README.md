@@ -31,7 +31,36 @@ d.pixel(26, 5)
 gu.update(d)
 ```
 
+## Simulate on the host
+
+See exactly what the 53x11 matrix will show — without touching the board.
+`sim/sim.py` runs the same `src/render.py` as the board, with a faithful
+re-implementation of the PicoGraphics bitmap6 font (`sim/font6_data.py`), so
+layouts match the device pixel-for-pixel. The sim never reads `secrets.py`;
+weather values are CLI args (`--code/--temp/--hi/--lo`).
+
+```
+python3 sim/sim.py print  --screen weather --code 61 --temp 21 --frames 8
+                              # plain ASCII frames on stdout (for agent analysis)
+python3 sim/sim.py play   --screen weather --code 61 --temp 21   # animate in terminal
+python3 sim/sim.py play   --screen hilo --hi 25 --lo 18
+```
+
+Recordings are generated on demand and never committed (gitignored):
+
+```
+python3 sim/sim.py play --screen weather --code 61 --frames 16 --gif /tmp/rain.gif
+python3 sim/before_after.py --ref main --screen weather --code 61 --out /tmp/pr_rain
+                              # writes /tmp/pr_rain_{before,after,compare}.gif — attach to the PR
+```
+
 ## Layout
 
-- `scripts/` — attach.sh
-- `main.py` — weather clock: open-meteo forecast on the matrix (deploy: `mpremote cp main.py :main.py`)
+- `AGENTS.md` — ramp-up essentials: golden rules, workflow, layout
+- `main.py` — board entry point: WiFi/NTP/open-meteo + screen loop (thin)
+- `src/render.py` — all drawing; pure functions, no board imports
+- `sim/` — host simulator (`sim.py`, `font6_data.py`)
+- `scripts/` — attach.sh, deploy.sh (uploads `main.py` + `src/render.py`, resets board)
+- `skills/`, `docs/`, `firmware/` — board procedures and local uf2 (gitignored)
+
+Deploy: `scripts/deploy.sh` (board attached first, see Connect above).

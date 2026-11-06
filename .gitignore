@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 *.uf2
 secrets.py
+# recorded sim output (frames/, *.gif) is generated on demand, never committed
+frames/
+*.gif
