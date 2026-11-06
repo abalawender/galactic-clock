@@ -214,6 +214,42 @@ class TestCO2(unittest.TestCase):
                              % (ppm, lit, want))
 
 
+class TestTZ(unittest.TestCase):
+    """src/tz.py: EU DST rule for Europe/* zones; UTC otherwise. Expected
+    boundary epochs come from CPython's calendar (independent of tz.py)."""
+
+    def test_eu_dst_2026(self):
+        import calendar
+        import tz
+        start = calendar.timegm((2026, 3, 29, 1, 0, 0))   # last Sun of Mar 01:00 UTC
+        end = calendar.timegm((2026, 10, 25, 1, 0, 0))     # last Sun of Oct 01:00 UTC
+        self.assertEqual(tz.utc_offset("Europe/Warsaw", start - 1), 3600)
+        self.assertEqual(tz.utc_offset("Europe/Warsaw", start), 7200)
+        self.assertEqual(tz.utc_offset("Europe/Warsaw", end - 1), 7200)
+        self.assertEqual(tz.utc_offset("Europe/Warsaw", end), 3600)
+
+    def test_eu_dst_2027(self):
+        import calendar
+        import tz
+        start = calendar.timegm((2027, 3, 28, 1, 0, 0))
+        end = calendar.timegm((2027, 10, 31, 1, 0, 0))
+        self.assertEqual(tz.utc_offset("Europe/Warsaw", start), 7200)
+        self.assertEqual(tz.utc_offset("Europe/Warsaw", end), 3600)
+
+    def test_midwinter_midsummer(self):
+        import calendar
+        import tz
+        self.assertEqual(tz.utc_offset("Europe/Warsaw",
+                                       calendar.timegm((2026, 1, 15, 12, 0, 0))), 3600)
+        self.assertEqual(tz.utc_offset("Europe/Warsaw",
+                                       calendar.timegm((2026, 7, 15, 12, 0, 0))), 7200)
+
+    def test_non_europe_is_utc(self):
+        import tz
+        self.assertEqual(tz.utc_offset("America/New_York", 1793972928), 0)
+        self.assertEqual(tz.utc_offset("mock", 1793972928), 0)
+
+
 class TestRunMainMocked(unittest.TestCase):
     """The real main.py under full mocks (hardware/internet/time stubbed)."""
 
