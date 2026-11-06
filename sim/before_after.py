@@ -51,7 +51,11 @@ def _hilo(d, R, f):
     R.draw_hilo(d, W, H, "25", "18")
 
 
-SCREENS = {"clock": (_clock, 30), "hilo": (_hilo, 1)}
+def _co2(d, R, f):
+    R.draw_co2(d, W, H, 812)
+
+
+SCREENS = {"clock": (_clock, 30), "hilo": (_hilo, 1), "co2": (_co2, 1)}
 
 # Weather goes through the real main loop on both sides (see module docstring).
 WEATHER_FUNC = "draw_weather"
