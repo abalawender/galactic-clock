@@ -17,7 +17,11 @@ Prerequisite: board attached to WSL2 (see `skills/board`). Use `mpremote`:
 Files on the flash: `/main.py` (autostart), `/render.py`, `/tz.py` — exactly
 what `scripts/deploy.sh` uploads. `/secrets.py` holds WiFi credentials and
 location: gitignored, and it must stay on the board only — never read, print,
-or `mpremote cp :secrets.py ...` it (see AGENTS.md golden rules).
+or `mpremote cp :secrets.py ...` it (see AGENTS.md golden rules). To *create*
+it, copy the committed template `secrets.example.py`, fill in real values, and
+upload host -> board only (`mpremote cp secrets.py :secrets.py`), then delete
+the local file; the variable contract is documented in README "Board
+configuration".
 The rest of the "default" Python (`galactic`, `picographics`,
 `breakout_scd41`, ...) is frozen into the firmware image (visible via
 `help('modules')` on the board), not files.
