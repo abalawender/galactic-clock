@@ -42,14 +42,15 @@ def margins(fb):
 
 
 def precip_cols(code, match, frames=8):
-    """Per-column row sequence of precipitation pixels below the cloud."""
+    """Per-column sequence of the topmost precipitation row below the cloud,
+    one entry per frame (streaks are 2 px tall; only the leading edge moves)."""
     cols = {}
     for f in range(frames):
         fb = frame(lambda d, f: render.draw_icon(d, code, f), f)
         for x in range(W):
-            for y in range(7, H):
-                if match(fb[y][x]):
-                    cols.setdefault(x, []).append(y)
+            ys = [y for y in range(7, H) if match(fb[y][x])]
+            if ys:
+                cols.setdefault(x, []).append(min(ys))
     return cols
 
 
@@ -127,16 +128,16 @@ class TestLayout(unittest.TestCase):
 # layout intentionally changes.
 GOLDEN_WEATHER_RAIN_F0 = (
     '                                                     \n'
-    '                 ++++                                \n'
-    '                 ++++                                \n'
+    '                 ++ ++                               \n'
+    '                +++++++                              \n'
     '               ++++++++    @@@  @@  @@@              \n'
     '               ++++++++       @  @ @                 \n'
     '               ++++++++     @@   @ @                 \n'
-    '               ++++++++    @     @ @                 \n'
+    '               --------    @     @ @                 \n'
     '                =          @@@@  @  @@@              \n'
-    '                   =                                 \n'
-    '                      =                              \n'
-    '                                                     '
+    '                = =                                  \n'
+    '                  = =                                \n'
+    '                    = =                              '
 )
 GOLDEN_HILO = (
     '                                                     \n'
@@ -248,6 +249,39 @@ class TestTZ(unittest.TestCase):
         import tz
         self.assertEqual(tz.utc_offset("America/New_York", 1793972928), 0)
         self.assertEqual(tz.utc_offset("mock", 1793972928), 0)
+
+
+class TestBeforeAfter(unittest.TestCase):
+    """sim/before_after.py: icon contact sheet + vertical stacking."""
+
+    def test_icons_grid_shape_and_animation(self):
+        import before_after
+        frames = before_after.render_icons(render, before_after.ICON_ENTRIES, 4)
+        self.assertEqual(len(frames), 4)
+        self.assertEqual(len(frames[0]), 3 * 11)     # 3 rows of 11 px cells
+        self.assertEqual(len(frames[0][0]), 4 * 11)  # 4 cols of 11 px cells
+        self.assertNotEqual(frames[0], frames[1])    # icons animate
+
+    def test_stack_infers_dims(self):
+        import before_after
+        a = before_after.render_icons(render, before_after.ICON_ENTRIES[:4], 2)
+        stacked, w, h = before_after.stack(a, a)
+        self.assertEqual((w, h), (4 * 11, 11))
+        self.assertEqual(len(stacked[0]), 2 * 11 + 1)  # + 1 px separator row
+
+    def test_identical_screen_writes_no_gifs(self):
+        # pixel-identical before/after must produce no GIFs at all, so the
+        # CI upload / PR comment skips the unchanged screen entirely
+        import os
+        import tempfile
+        import before_after
+        frames = before_after.render_icons(render, before_after.ICON_ENTRIES[:4], 2)
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "pr")
+            msg = before_after.write_screen_gifs(out, "icons", frames, frames,
+                                                 "base", 4, 100)
+            self.assertIn("pixel-identical", msg)
+            self.assertEqual(os.listdir(td), [])  # nothing written at all
 
 
 class TestRunMainMocked(unittest.TestCase):
