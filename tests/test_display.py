@@ -298,9 +298,9 @@ class TestDemoGif(unittest.TestCase):
 
     def setUp(self):
         try:
-            import PIL  # noqa: F401
+            from PIL import Image  # noqa: F401 — also catches a broken native install
         except ImportError:
-            self.skipTest("Pillow not installed")
+            self.skipTest("Pillow not available")
 
     def test_demo_gif_matches_code(self):
         import check_demo_gif

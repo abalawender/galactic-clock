@@ -133,10 +133,11 @@ python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
   then resets the board
 - PRs to `micropython` that touch `main.py`/`src/`/`sim/`/`tests/` run the tests
   and post before/after GIFs inline on the PR — see `.github/workflows/pr-sim.yml`
-- Pushes to `micropython` re-run the tests and verify the tracked demo GIF above
-  still matches the merged code — `.github/workflows/micropython-check.yml` →
-  `python3 sim/check_demo_gif.py`. If you change rendering, regenerate
-  `docs/demo-rotation.gif` in the same PR (command above the GIF)
+- `micropython-check` (`.github/workflows/micropython-check.yml`) runs on PRs to
+  `micropython` and on pushes to it: tests + a check that the tracked demo GIF
+  above matches the code (`sim/check_demo_gif.py`) — mark it as a required check
+  to block merges. If you change rendering, regenerate `docs/demo-rotation.gif`
+  in the same PR (command above the GIF)
 
 ## Layout
 
