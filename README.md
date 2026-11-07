@@ -1,13 +1,33 @@
 # galactic-unicorn
 
-Pimoroni Galactic Unicorn (53x11 LED matrix) on Raspberry Pi Pico W, running MicroPython.
+Pimoroni Galactic Unicorn (53x11 LED matrix) on a Raspberry Pi Pico W running
+MicroPython. A weather clock that rotates four screens on the matrix:
 
-## Environment
+- **clock** — local time, RTC synced via NTP (EU DST computed in pure integer
+  math in `src/tz.py` — MicroPython has no tzdata), blinking colon
+- **weather** — animated 10x11 icon + current temperature from open-meteo (no
+  API key); icons are hand-drawn pixel art per WMO code with day/night variants
+  (twinkling sun/moon, drifting fog bands, falling rain/snow, flashing storm bolt)
+- **hi/lo** — today's high/low with up/down arrows
+- **CO2** — ppm from an optional SCD41 sensor on the STEMMA QT connector,
+  color-coded green/amber/red by indoor air quality
 
+![Display loop demo](docs/demo-rotation.gif)
+
+The full rotation (clock → animated weather → hi/lo → CO2), rendered by the
+host sim from the real `main.py` — regenerate with
+`python3 sim/run_main.py --seconds 18 --delay 0.12 --gif docs/demo-rotation.gif`
+(needs Pillow; this one GIF is tracked, all other recordings stay uncommitted).
+
+## Hardware & host setup
+
+- Pimoroni Galactic Unicorn (Pico W); optional SCD41 CO2 sensor (STEMMA QT, SDA=4/SCL=5)
 - Windows 11 host + WSL2 (Ubuntu-24.04); repo: `/home/adam/dev/galactic-unicorn`
 - Board on host USB bus 2-2; usbipd: `usbipd.exe`; `mpremote` (apt install micropython-mpremote)
+- Pillow — only needed for `--gif` output in the sim (everything else is stdlib)
 - Firmware: MicroPython v1.29.0 board build `pico_w_galactic-v1.29.0-micropython.uf2`
   from https://github.com/pimoroni/unicorn/releases/tag/v1.29.0
+  (local copy in `firmware/`, gitignored — flashing notes in `docs/flashing.md`)
 
 ## Connect
 
@@ -48,6 +68,17 @@ python3 sim/sim.py play   --screen icons --frames 8              # contact sheet
 python3 sim/sim.py play   --screen hilo --hi 25 --lo 18
 ```
 
+See it in motion — render any screen, or the whole display loop of the real
+`main.py` (fully mocked: WiFi/NTP/open-meteo/SCD41), to an animated GIF
+(needs Pillow; GIFs are gitignored and generated on demand for PRs — the only
+tracked one is the README demo above):
+
+```
+python3 sim/run_main.py --seconds 18 --gif /tmp/rotation.gif   # clock -> weather -> hi/lo -> CO2
+python3 sim/sim.py play --screen icons --frames 8 --gif /tmp/icons.gif
+python3 sim/sim.py play --screen weather --code 61 --temp 21 --frames 12 --gif /tmp/rain.gif
+```
+
 HITL review on the physical board (see all icons before approving a PR):
 `python3 skills/display/display.py --icons` cycles every weather icon on the
 matrix, 3 s each, WMO code labelled (`n` = night); then `--stop` and
@@ -59,10 +90,11 @@ fog bands, falling rain streaks (drizzle/snow fall slower, showers pulse,
 heavy variants denser), and a flashing bolt for storms. The icons are
 hand-drawn 10x11 pixel art, tuned frame by frame in the sim.
 
-Recordings are generated on demand and never committed (gitignored):
+Recordings are generated on demand and never committed (gitignored). For PR
+reviews, before/after GIFs of every screen (base ref vs PR head) are rendered
+automatically:
 
 ```
-python3 sim/sim.py play --screen weather --code 61 --frames 16 --gif /tmp/rain.gif
 python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
                               # writes /tmp/pr_<screen>_{before,after,compare}.gif per screen
                               # (weather/icons/clock/hilo/co2) plus pr_rotation_* — a full mocked
@@ -76,19 +108,36 @@ python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
                               # to the PR; CI does this automatically.
 ```
 
-PRs to `micropython` that touch `main.py`/`src/`/`sim/`/`tests/` automatically
-run the unit tests (`python3 -m unittest discover -s tests -v` — rendered
-bitmap checks, golden ASCII dumps, mocked full run of the real `main.py`) and
-get before/after GIFs (base ref vs PR head) as a `sim-before-after` workflow
-artifact — see `.github/workflows/pr-sim.yml`; a bot comment links the run.
+## Development
+
+- Tests (host-only, no board): `python3 -m unittest discover -s tests -v` —
+  rendered-bitmap property checks, golden ASCII dumps, EU DST rules, and a
+  fully mocked run of the real `main.py`
+- Preview every display change in `sim/` before deploying (above)
+- Deploy: `scripts/deploy.sh` — attaches the board first if `/dev/ttyACM0` is
+  missing (see Connect above), uploads `main.py` + `src/render.py` + `src/tz.py`,
+  then resets the board
+- PRs to `micropython` that touch `main.py`/`src/`/`sim/`/`tests/` run the tests
+  and post before/after GIFs inline on the PR — see `.github/workflows/pr-sim.yml`
 
 ## Layout
 
 - `AGENTS.md` — ramp-up essentials: golden rules, workflow, layout
-- `main.py` — board entry point: WiFi/NTP/open-meteo + screen loop (thin)
-- `src/render.py` — all drawing; pure functions, no board imports
-- `sim/` — host simulator (`sim.py`, `font6_data.py`)
-- `scripts/` — attach.sh, deploy.sh (uploads `main.py` + `src/render.py`, resets board)
-- `skills/`, `docs/`, `firmware/` — board procedures and local uf2 (gitignored)
+- `main.py` — board entry point: WiFi/NTP/open-meteo/SCD41 + screen loop (thin)
+- `src/render.py` — all drawing; pure functions, no board imports (also runs in the sim)
+- `src/tz.py` — EU DST offset in pure integer math (MicroPython has no tzdata)
+- `sim/` — host simulator: `sim.py` (play/print/GIF), `font6_data.py` (real
+  bitmap6 font metrics), `run_main.py` (mocked full run of `main.py`),
+  `before_after.py` (PR review GIFs), `gif.py` (Pillow writer)
+- `tests/` — unittest suite (bitmaps, golden ASCII, tz rules, mocked main loop)
+- `scripts/` — attach.sh, deploy.sh (uploads `main.py` + `render.py` + `tz.py`, resets board)
+- `skills/` — agent skills: board attach/recovery (`board`), flash file
+  management (`board-files`), on-device display snippets (`display`)
+- `docs/` — flashing notes + the tracked README demo GIF; `firmware/` — local uf2 copy (gitignored)
 
-Deploy: `scripts/deploy.sh` (board attached first, see Connect above).
+## License & contributing
+
+MIT — see [LICENSE](LICENSE). Contributions welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md): branch off `micropython`, keep commits
+small and atomic, and CI will run the tests and post before/after GIF
+previews inline on your PR.
