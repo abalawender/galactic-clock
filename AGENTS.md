@@ -32,21 +32,35 @@ hi/lo screen.
   show, using the exact `src/render.py` code and real bitmap6 font metrics:
   `python3 sim/sim.py print --screen weather --code 61 --temp 21 --frames 8`
   writes plain ASCII frames to stdout for agent analysis;
-  `python3 sim/sim.py play ...` animates in the terminal.
-- **Recordings are never committed** (`frames/`, `*.gif` gitignored). For a
+  `python3 sim/sim.py play ...` animates in the terminal. Render the whole
+  rotation loop (real `main.py`, fully mocked) to a GIF for reviews:
+  `python3 sim/run_main.py --seconds 18 --gif /tmp/rotation.gif` (needs Pillow).
+- **Run the tests with any display change**:
+  `python3 -m unittest discover -s tests -v` — bitmap property checks, golden
+  ASCII dumps, tz DST rules, and a mocked full run of `main.py`.
+- **Recordings are never committed** (`frames/`, `*.gif` gitignored — the one
+  exception is the tracked README demo `docs/demo-rotation.gif`). For a
   pull request, generate a GIF on demand and attach it, e.g.
   `python3 sim/before_after.py --ref main --out /tmp/pr`
   → attach e.g. `/tmp/pr_weather_compare.gif` to the PR.
 
 ## Layout
 
-- `main.py` — board entry point (WiFi/NTP/open-meteo + screen loop), thin
+- `main.py` — board entry point (WiFi/NTP/open-meteo/SCD41 + screen loop), thin
 - `src/render.py` — all drawing; pure functions taking a PicoGraphics-like `d`
-- `sim/` — host simulator (`sim.py`) + `font6_data.py` (Pimoroni font6, for the sim)
-- `skills/`, `docs/` — board attach/flashing/display procedures
+- `src/tz.py` — EU DST offset, pure integer math (no tzdata on the board)
+- `sim/` — host simulator: `sim.py`, `font6_data.py` (Pimoroni font6),
+  `run_main.py` (mocked full run of main.py), `before_after.py` (PR GIFs)
+- `tests/` — unittest suite, host-only (`python3 -m unittest discover -s tests -v`)
+- `scripts/` — attach.sh, deploy.sh
+- `skills/`, `docs/` — board attach/recovery, flash file management, on-device
+  display snippets, flashing notes
 - `firmware/` — local .uf2 copy (gitignored)
 
 ## Branches
 
-`main` and `micropython` (active work happens on `micropython`), plus `tts`.
+`main`, `micropython` (PR target — active work happens on short-lived
+`feat/*` / `fix/*` branches merged into it), plus `tts`.
 Check `git branch` before committing; do not push without asking.
+External contributors: `CONTRIBUTING.md` (branch off `micropython`, open a PR —
+CI runs the tests and posts before/after GIF previews on the PR).

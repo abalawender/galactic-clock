@@ -7,6 +7,11 @@ description: Make the Galactic Unicorn (Pico W) available in WSL2 via usbipd whe
 
 Use when `/dev/ttyACM0` is missing or `mpremote exec` gets no response.
 
+Fast path first: `ls /dev/ttyACM0` — if missing, run `scripts/attach.sh`
+(which is just `usbipd.exe attach --wsl --busid 2-2`; `scripts/deploy.sh`
+auto-runs it too). Verify with `mpremote exec "print('ok')"`. Only if attach
+fails or the REPL stays silent, work through the manual recovery below:
+
 1. List host USB devices: `usbipd.exe list`
 2. Find the board by VID:PID:
    - `2e8a:0005` — MicroPython running (normal state)
