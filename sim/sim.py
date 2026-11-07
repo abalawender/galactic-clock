@@ -109,7 +109,8 @@ def frame_to_text(fb):
 
 def make_screen_fn(args):
     if args.screen == "weather":
-        return lambda d, f: render.draw_weather(d, W, H, args.code, "%dC" % args.temp, f)
+        return lambda d, f: render.draw_weather(d, W, H, args.code, "%dC" % args.temp, f,
+                                                0 if args.night else 1)
     if args.screen == "clock":
         return lambda d, f: render.draw_clock(d, W, H, "21", "%02d" % (f % 60), f % 2 == 0)
     if args.screen == "hilo":
@@ -138,6 +139,7 @@ def main():
                     choices=["weather", "clock", "hilo", "co2", "message"])
     ap.add_argument("--code", type=int, default=61, help="WMO weather code (weather screen)")
     ap.add_argument("--temp", type=int, default=21, help="current temperature C")
+    ap.add_argument("--night", action="store_true", help="weather screen: night (moon)")
     ap.add_argument("--hi", type=int, default=25)
     ap.add_argument("--lo", type=int, default=18)
     ap.add_argument("--ppm", type=int, default=812, help="CO2 ppm (co2 screen)")

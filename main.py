@@ -75,7 +75,7 @@ def connect_wifi():
 
 def fetch_weather():
     url = ("%s?latitude=%s&longitude=%s"
-           "&current=temperature_2m,weather_code"
+           "&current=temperature_2m,weather_code,is_day"
            "&daily=temperature_2m_max,temperature_2m_min"
            "&timezone=%s&forecast_days=1"
            % (WX_URL, LOCATION_LAT, LOCATION_LON, TZ.replace("/", "%2F")))
@@ -88,6 +88,7 @@ def fetch_weather():
 def show_weather(wx, seconds):
     code = wx["current"]["weather_code"]
     temp = "%dC" % round(wx["current"]["temperature_2m"])
+    is_day = wx["current"].get("is_day", 1)
     end = time.time() + seconds
     frame = 0
     while time.time() < end:
@@ -95,7 +96,7 @@ def show_weather(wx, seconds):
         # frame must advance by exactly 1 per shown frame: time.time() is int
         # seconds on this build, so int(time.time()*3) jumps 0,3,6,9... and
         # the drops appear to fall upwards
-        render.draw_weather(d, W, H, code, temp, frame)
+        render.draw_weather(d, W, H, code, temp, frame, is_day)
         frame += 1
         gu.update(d)
         time.sleep(0.15)

@@ -37,24 +37,37 @@ See exactly what the 53x11 matrix will show — without touching the board.
 `sim/sim.py` runs the same `src/render.py` as the board, with a faithful
 re-implementation of the PicoGraphics bitmap6 font (`sim/font6_data.py`), so
 layouts match the device pixel-for-pixel. The sim never reads `secrets.py`;
-weather values are CLI args (`--code/--temp/--hi/--lo`).
+weather values are CLI args (`--code/--temp/--hi/--lo/--night`).
 
 ```
 python3 sim/sim.py print  --screen weather --code 61 --temp 21 --frames 8
                               # plain ASCII frames on stdout (for agent analysis)
 python3 sim/sim.py play   --screen weather --code 61 --temp 21   # animate in terminal
+python3 sim/sim.py play   --screen weather --code 0 --night      # moon + stars
 python3 sim/sim.py play   --screen hilo --hi 25 --lo 18
 ```
+
+The weather icon (10x11, left of the temperature) is animated per WMO code:
+twinkling sun/moon, partly-cloudy sun+moon peeking behind a drifting cloud,
+fog bands, falling rain streaks (drizzle/snow fall slower, showers pulse,
+heavy variants denser), and a flashing bolt for storms. The icons are
+hand-drawn 10x11 pixel art, tuned frame by frame in the sim.
 
 Recordings are generated on demand and never committed (gitignored):
 
 ```
 python3 sim/sim.py play --screen weather --code 61 --frames 16 --gif /tmp/rain.gif
-python3 sim/before_after.py --ref main --out /tmp/pr
+python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
                               # writes /tmp/pr_<screen>_{before,after,compare}.gif per screen
-                              # (weather/clock/hilo) plus pr_rotation_* — a full mocked run of
-                              # the real main.py (sim/run_main.py), robust to screen changes.
-                              # Attach the GIFs to the PR; CI does this automatically.
+                              # (weather/icons/clock/hilo/co2) plus pr_rotation_* — a full mocked
+                              # run of the real main.py (sim/run_main.py), robust to screen changes.
+                              # "icons" is a contact sheet of every animated weather icon
+                              # (WMO code x day/night) in one GIF. --ref takes the PR base SHA
+                              # (CI passes github.event.pull_request.base.sha); locally use
+                              # origin/micropython. Screens pixel-identical to the base
+                              # produce no GIFs at all, so the CI upload/PR comment skips
+                              # them — the review only shows what changed. Attach the GIFs
+                              # to the PR; CI does this automatically.
 ```
 
 PRs to `micropython` that touch `main.py`/`src/`/`sim/`/`tests/` automatically
