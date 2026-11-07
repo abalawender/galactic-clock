@@ -18,8 +18,9 @@ on:
       - docs/demo-rotation.gif
       - .github/workflows/micropython-check.yml
   pull_request:
+    # no path filter: the micropython-check ruleset requires this check on
+    # every PR to micropython, so it must run even for docs-only changes
     branches: [micropython]
-    paths: *check-paths
 
 permissions: {}  # read-only: this workflow only runs tests and compares files
 

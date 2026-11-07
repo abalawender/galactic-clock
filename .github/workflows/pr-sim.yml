@@ -8,8 +8,9 @@ name: sim-before-after
 
 on:
   pull_request:
+    # no path filter: sim-before-after/gifs is a required check on every PR to
+    # micropython; docs-only PRs simply produce no GIFs (nullglob-guarded)
     branches: [micropython]
-    paths: [main.py, src/**, sim/**, tests/**]
 
 permissions:
   contents: write      # release assets (inline GIFs in the PR comment)
