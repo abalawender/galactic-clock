@@ -39,6 +39,20 @@ usbipd.exe attach --wsl --busid 2-2   # -> /dev/ttyACM0
 mpremote exec "import os; print(os.uname().version)"
 ```
 
+## Board configuration (`secrets.py`)
+
+The board reads `/secrets.py` at boot. It is gitignored and lives only on the
+board flash — never commit it, never print it, never copy it back off the
+board. To create it, copy the committed template `secrets.example.py` — each
+variable is documented inline there (WiFi, location, `TZ`, optional
+`SCD41_ALTITUDE_M`) — and fill in real values:
+
+```
+cp secrets.example.py secrets.py    # fill in real values
+mpremote cp secrets.py :secrets.py   # host -> board only
+rm secrets.py                       # board holds the only copy
+```
+
 ## Board API
 
 ```python

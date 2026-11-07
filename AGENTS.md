@@ -8,6 +8,8 @@ hi/lo screen.
 
 - **Never read, print, or commit `secrets.py`** (WiFi credentials, location,
   `SCD41_ALTITUDE_M`). It is gitignored; the board holds the only copy.
+  Variable contract + how to create it: `secrets.example.py` and README
+  "Board configuration" — fill the template, upload host -> board, delete local.
 - Board code must stay MicroPython-compatible: no CPython-only stdlib, match
   the existing `%`-formatting style, keep `src/render.py` free of board imports
   (it also runs on the host in `sim/`).
