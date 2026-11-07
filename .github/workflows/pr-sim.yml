@@ -82,12 +82,8 @@ jobs:
           done
           # prune archived copies: keep the newest 40 (run ids sort numerically)
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/pr-sim-assets" \
-            --jq '.assets[] | select(.name | test("_r[0-9]+\\.gif$")) | "\(.name)"' \
-            | sed -E 's/^(.*)_r([0-9]+)\.gif$/\2 \1/' | sort -rn | awk 'NR > 40 {print $2}' \
-            | while read -r name; do
-                [ -n "$name" ] || continue
-                aid=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/pr-sim-assets" \
-                  --jq '.assets[] | select(.name == $n) | .id' -f "n=$name")
+            --jq '[.assets[] | select(.name | test("_r[0-9]+\\.gif$")) | {id, run: (.name | capture("_r(?<r>[0-9]+)\\.gif$") | .r | tonumber)}] | sort_by(-.run) | .[40:] | .[].id' \
+            | while read -r aid; do
                 [ -n "$aid" ] || continue
                 gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$aid" > /dev/null
               done
