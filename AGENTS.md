@@ -1,4 +1,4 @@
-# AGENTS.md — galactic-unicorn
+# AGENTS.md — galactic-clock
 
 Pimoroni Galactic Unicorn (53x11 LED matrix) on a Raspberry Pi Pico W running
 MicroPython. Weather clock: open-meteo forecast rotated with a clock and a
