@@ -60,6 +60,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -x
           gh release create pr-sim-assets --prerelease --title pr-sim-assets \
             --notes 'hidden asset store for pr-sim inline GIFs' --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
           # the tag was auto-created on the default branch (main) by the first
@@ -76,15 +77,18 @@ jobs:
               *_after.gif) [[ -f "/tmp/${base%_after.gif}_compare.gif" ]] && continue ;;
             esac
             cp "$f" "/tmp/${base%.gif}_${RUN_TAG}.gif"
-            gh release upload pr-sim-assets "/tmp/${base%.gif}_${RUN_TAG}.gif" --repo "$GITHUB_REPOSITORY"
+            # --clobber: re-runs of the same run id must not fail on existing assets
+            gh release upload pr-sim-assets "/tmp/${base%.gif}_${RUN_TAG}.gif" --clobber --repo "$GITHUB_REPOSITORY"
           done
           # prune archived copies: keep the newest 40 (run ids sort numerically)
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/pr-sim-assets" \
             --jq '.assets[] | select(.name | test("_r[0-9]+\\.gif$")) | "\(.name)"' \
             | sed -E 's/^(.*)_r([0-9]+)\.gif$/\2 \1/' | sort -rn | awk 'NR > 40 {print $2}' \
             | while read -r name; do
+                [ -n "$name" ] || continue
                 aid=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/pr-sim-assets" \
                   --jq --arg n "$name" '.assets[] | select(.name == $n) | .id')
+                [ -n "$aid" ] || continue
                 gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$aid" > /dev/null
               done
           {
