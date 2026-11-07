@@ -1,4 +1,4 @@
-# galactic-unicorn
+# galactic-clock
 
 Pimoroni Galactic Unicorn (53x11 LED matrix) on a Raspberry Pi Pico W running
 MicroPython. A weather clock that rotates four screens on the matrix:
@@ -22,7 +22,7 @@ host sim from the real `main.py` — regenerate with
 ## Hardware & host setup
 
 - Pimoroni Galactic Unicorn (Pico W); optional SCD41 CO2 sensor (STEMMA QT, SDA=4/SCL=5)
-- Windows 11 host + WSL2 (Ubuntu-24.04); repo: `/home/adam/dev/galactic-unicorn`
+- Windows 11 host + WSL2 (Ubuntu-24.04); repo: `/home/adam/dev/galactic-clock` (GitHub: `abalawender/galactic-clock`)
 - Board on host USB bus 2-2; usbipd: `usbipd.exe`; `mpremote` (apt install micropython-mpremote)
 - Pillow — only needed for `--gif` output in the sim (everything else is stdlib)
 - Firmware: MicroPython v1.29.0 board build `pico_w_galactic-v1.29.0-micropython.uf2`
