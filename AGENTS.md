@@ -65,6 +65,13 @@ Most contributions here come from agents — this file is the contract:
    physical board: `python3 skills/display/display.py --icons` after
    `scripts/deploy.sh --no-reset` (so the board runs *your* render.py), then
    `mpremote reset` to return to the clock.
+   `micropython` is protected by a ruleset: one approving review and all threads
+   resolved are required; merges are **rebase-only with required linear
+   history** (no squash — the atomic commits from step 2 are what lands);
+   deletion and non-fast-forward pushes are blocked; the `micropython-check`
+   status (workflow of the same name) must be green **and up to date** (strict
+   policy). So before asking for review / merging, rebase:
+   `git fetch origin && git rebase origin/micropython` and re-push.
 5. If the change affects rendering, regenerate the README demo GIF in the same
    branch: `python3 sim/run_main.py --seconds 18 --delay 0.12 --gif
    docs/demo-rotation.gif`. The `micropython-check` workflow runs on the PR and
