@@ -154,7 +154,7 @@ def _rows(d, ox, oy, rows, dx=0, dy=0):
         d.rectangle(ox + xa + dx, oy + y + dy, xb - xa + 1, 1)
 
 
-def _cloud(d, ox, oy, dark=False):
+def _cloud(d, ox, oy, dark=False, dy=0):
     # storm cloud: same shape, dark body, darker left bump, light flecks
     tone = {WHITE: STORM_CLOUD, CLOUD: STORM_SHADE, CLOUD_MID: STORM_HI,
             CLOUD_SHADE: STORM_SHADE}
@@ -163,7 +163,7 @@ def _cloud(d, ox, oy, dark=False):
         if dark:
             col = tone[col]
         rows.append((y, xa, xb, col))
-    _rows(d, ox, oy, rows)
+    _rows(d, ox, oy, rows, dy=dy)
 
 
 def _sun(d, ox, oy, frame):
@@ -226,14 +226,16 @@ def draw_icon(d, code, frame, ox=0, oy=0, is_day=1):
             _moon(d, ox, oy, frame)
         return
     if kind == "partly":
+        # no precipitation rows needed: shift the whole group down so the
+        # icon is vertically centered in the 11-row area
         if is_day:
-            _small_sun(d, ox, oy, frame)
+            _small_sun(d, ox, oy + 2, frame)
         else:
-            _small_moon(d, ox, oy)
-        _rows(d, ox, oy, PARTLY_CLOUD_ROWS)
+            _small_moon(d, ox, oy + 2)
+        _rows(d, ox, oy, PARTLY_CLOUD_ROWS, dy=2)
         return
     if kind == "cloud":
-        _cloud(d, ox, oy)
+        _cloud(d, ox, oy, dy=2)  # no rain: center vertically
         return
     if kind == "fog":
         _fog(d, ox, oy, frame)
