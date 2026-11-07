@@ -11,6 +11,9 @@ Usage:
                                  # plain ASCII frames to stdout (for agents/diffs)
     python3 sim/sim.py play   --screen weather --code 61 --temp 21 --frames 12
                                  # animated in the terminal
+    python3 sim/sim.py play   --screen icons --frames 8
+                                 # contact sheet of every weather icon (HITL review
+                                 # on the host; on the board: skills/display --icons)
     python3 sim/sim.py play   --screen clock --frames 8
     python3 sim/sim.py play   --screen hilo --hi 25 --lo 18
     python3 sim/sim.py play   --screen clock --frames 30 --gif /tmp/clock.gif
@@ -23,6 +26,7 @@ Screens: weather (icon + temp), clock, hilo, message. --frames N renders N
 animation ticks (frame 0..N-1); --delay sets playback seconds per frame.
 """
 import argparse
+import inspect
 import os
 import sys
 import time
@@ -129,6 +133,35 @@ def render_frame(fn, frame):
     return d.fb
 
 
+# --- icons contact sheet ----------------------------------------------------
+# Shared with before_after.py so `sim.py --screen icons` and the PR tool render
+# the same grid. Entries are (WMO code, is_day).
+ICON_ENTRIES = ((0, 1), (2, 1), (3, 1), (45, 1), (51, 1), (61, 1), (65, 1),
+                (71, 1), (80, 1), (95, 1), (0, 0), (2, 0))
+ICON_COLS = 4
+ICON_CELL = 11  # icons are 10x11 + 1 px gap
+
+
+def render_icons(R, entries, n):
+    """n frames of a contact sheet of R.draw_icon over (code, is_day) entries."""
+    day_aware = "is_day" in inspect.signature(R.draw_icon).parameters
+    rows = (len(entries) + ICON_COLS - 1) // ICON_COLS
+    w, h = ICON_COLS * ICON_CELL, rows * ICON_CELL
+    out = []
+    for f in range(n):
+        d = SimGraphics(w, h)
+        R.clear(d, w, h)
+        for i, (code, is_day) in enumerate(entries):
+            ox = (i % ICON_COLS) * ICON_CELL
+            oy = (i // ICON_COLS) * ICON_CELL
+            if day_aware:
+                R.draw_icon(d, code, f, ox, oy, is_day=is_day)
+            else:  # older render.py without day/night icons
+                R.draw_icon(d, code, f, ox, oy)
+        out.append(d.fb)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -136,7 +169,7 @@ def main():
                     help="play: animate in terminal; print: plain ASCII frames "
                          "to stdout (no escape codes)")
     ap.add_argument("--screen", default="weather",
-                    choices=["weather", "clock", "hilo", "co2", "message"])
+                    choices=["weather", "clock", "hilo", "co2", "message", "icons"])
     ap.add_argument("--code", type=int, default=61, help="WMO weather code (weather screen)")
     ap.add_argument("--temp", type=int, default=21, help="current temperature C")
     ap.add_argument("--night", action="store_true", help="weather screen: night (moon)")
@@ -152,8 +185,11 @@ def main():
     ap.add_argument("--scale", type=int, default=8, help="GIF pixel scale")
     args = ap.parse_args()
 
-    fn = make_screen_fn(args)
-    frames = [render_frame(fn, f) for f in range(args.frames)]
+    if args.screen == "icons":
+        frames = render_icons(render, ICON_ENTRIES, args.frames)
+    else:
+        fn = make_screen_fn(args)
+        frames = [render_frame(fn, f) for f in range(args.frames)]
 
     if args.gif:
         from gif import write_gif

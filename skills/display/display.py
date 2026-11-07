@@ -5,6 +5,11 @@ Usage:
     python3 skills/display/display.py                  # orange dots flying around
     python3 skills/display/display.py --text "Hi"      # static text (clips at 53 px)
     python3 skills/display/display.py --logo           # static Mistral logo (brand gradient)
+    python3 skills/display/display.py --icons          # HITL review: cycle every weather
+                                                       # icon on the board, 3 s each, WMO code
+                                                       # labelled ("n" = night); loops until
+                                                       # interrupted, then `mpremote reset`
+                                                       # returns to the weather clock
     python3 skills/display/display.py --stop           # interrupt animation and clear
 
 The animation loop runs in the board's main REPL thread, so any later mpremote
@@ -71,6 +76,36 @@ for i, h in enumerate(heights):
 gu.update(d)
 """
 
+# HITL icon review: cycle every weather icon variant on the matrix, 3 s each,
+# with the WMO code drawn next to it ("n" suffix = night variant). Uses the
+# deployed render.py, so this shows exactly what the board firmware will draw.
+ICONS = """from galactic import GalacticUnicorn
+from picographics import PicoGraphics, DISPLAY_GALACTIC_UNICORN
+import render
+import time
+gu = GalacticUnicorn()
+d = PicoGraphics(display=DISPLAY_GALACTIC_UNICORN)
+W, H = gu.WIDTH, gu.HEIGHT
+CODES = [(0, 1), (2, 1), (3, 1), (45, 1), (51, 1), (61, 1), (65, 1),
+         (71, 1), (75, 1), (80, 1), (85, 1), (95, 1), (0, 0), (2, 0)]
+i = 0
+frame = 0
+while True:
+    code, day = CODES[i % len(CODES)]
+    label = "%d" % code if day else "%dn" % code
+    end = time.time() + 3
+    while time.time() < end:
+        d.set_pen(d.create_pen(0, 0, 0))
+        d.rectangle(0, 0, W, H)
+        render.draw_icon(d, code, frame, 0, 0, day)
+        d.set_pen(d.create_pen(255, 255, 255))
+        d.text(label, 14, 2, scale=1)
+        gu.update(d)
+        frame += 1
+        time.sleep(0.15)
+    i += 1
+"""
+
 CLEAR = """from galactic import GalacticUnicorn
 GalacticUnicorn().clear()
 """
@@ -92,11 +127,19 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--text", help="static text to show instead of the animation")
     ap.add_argument("--logo", action="store_true", help="show the Mistral logo")
+    ap.add_argument("--icons", action="store_true",
+                    help="HITL review: cycle all weather icons on the board, "
+                         "3 s each with the WMO code labelled; loops until "
+                         "interrupted (then --stop / mpremote reset)")
     ap.add_argument("--stop", action="store_true", help="interrupt animation and clear")
     args = ap.parse_args()
 
     if args.stop:
         run(CLEAR)
+    elif args.icons:
+        # review loops forever on the board; the timeout only bounds the local
+        # subprocess — interrupt with Ctrl-C / --stop when done reviewing
+        run(ICONS, timeout=600)
     elif args.logo:
         run(LOGO)
     elif args.text is not None:

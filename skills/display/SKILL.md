@@ -16,7 +16,13 @@ description: Display static content (text, Mistral logo) on the Pimoroni Galacti
 python3 skills/display/display.py                  # orange dots flying around, plays until interrupted
 python3 skills/display/display.py --text "Hi"      # static text (clips at 53 px)
 python3 skills/display/display.py --logo           # static Mistral logo
+python3 skills/display/display.py --icons          # HITL review: cycle all weather icons on the
+                                                   # board, 3 s each, WMO code labelled ("n" =
+                                                   # night variant); loops until interrupted.
+                                                   # Host-only alternative: python3 sim/sim.py
+                                                   # play --screen icons
 python3 skills/display/display.py --stop           # interrupt animation and clear
+# after --icons, `mpremote reset` reboots the board back into main.py (weather clock)
 ```
 
 ## How it works
