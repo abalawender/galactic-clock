@@ -67,10 +67,11 @@ Most contributions here come from agents — this file is the contract:
    `mpremote reset` to return to the clock.
 5. If the change affects rendering, regenerate the README demo GIF in the same
    branch: `python3 sim/run_main.py --seconds 18 --delay 0.12 --gif
-   docs/demo-rotation.gif`. The push check on `micropython`
-   (`.github/workflows/micropython-check.yml` → `sim/check_demo_gif.py`) fails
-   if the merged code and the GIF disagree; `tests/` runs the same comparison
-   locally (skipped without Pillow).
+   docs/demo-rotation.gif`. The `micropython-check` workflow runs on the PR and
+   on push to `micropython` (`.github/workflows/micropython-check.yml` →
+   `sim/check_demo_gif.py`) and fails if code and GIF disagree — it must be a
+   required check in branch protection to actually block the merge. `tests/`
+   runs the same comparison locally (skipped without Pillow).
 
 ## Layout
 

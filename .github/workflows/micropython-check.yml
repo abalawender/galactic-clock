@@ -1,21 +1,25 @@
 name: micropython-check
 
-# On every push to micropython: the unit tests must pass, and the tracked README
-# demo GIF (docs/demo-rotation.gif) must still match what the merged code
-# renders — sim/check_demo_gif.py re-renders the frames and compares decoded
-# pixels. If a PR changes rendering, regenerate the GIF in that same PR:
+# On every PR to micropython and every push to it: the unit tests must pass,
+# and the tracked README demo GIF (docs/demo-rotation.gif) must match what the
+# code renders — sim/check_demo_gif.py re-renders the frames and compares
+# decoded pixels. Mark this check as required in branch protection to block
+# merges. If a PR changes rendering, regenerate the GIF in that same PR:
 #   python3 sim/run_main.py --seconds 18 --delay 0.12 --gif docs/demo-rotation.gif
 
 on:
   push:
     branches: [micropython]
-    paths:
+    paths: &check-paths
       - main.py
       - src/**
       - sim/**
       - tests/**
       - docs/demo-rotation.gif
       - .github/workflows/micropython-check.yml
+  pull_request:
+    branches: [micropython]
+    paths: *check-paths
 
 permissions: {}  # read-only: this workflow only runs tests and compares files
 
