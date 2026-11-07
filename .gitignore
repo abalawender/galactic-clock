@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 *.uf2
 secrets.py
-# recorded sim output (frames/, *.gif) is generated on demand, never committed
+# recorded sim output (frames/, *.gif) is generated on demand, never committed —
+# except the one tracked demo GIF embedded in the README
 frames/
 *.gif
+!docs/demo-rotation.gif
