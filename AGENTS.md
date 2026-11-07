@@ -65,6 +65,12 @@ Most contributions here come from agents — this file is the contract:
    physical board: `python3 skills/display/display.py --icons` after
    `scripts/deploy.sh --no-reset` (so the board runs *your* render.py), then
    `mpremote reset` to return to the clock.
+5. If the change affects rendering, regenerate the README demo GIF in the same
+   branch: `python3 sim/run_main.py --seconds 18 --delay 0.12 --gif
+   docs/demo-rotation.gif`. The push check on `micropython`
+   (`.github/workflows/micropython-check.yml` → `sim/check_demo_gif.py`) fails
+   if the merged code and the GIF disagree; `tests/` runs the same comparison
+   locally (skipped without Pillow).
 
 ## Layout
 
