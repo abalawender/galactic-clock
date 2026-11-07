@@ -13,9 +13,15 @@ same code runs on the board (main.py, real PicoGraphics) and on the host
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 CLOUD = (160, 160, 170)
+CLOUD_SHADE = (105, 105, 120)   # cloud underside
+STORM_CLOUD = (125, 125, 140)
+SUN = (255, 200, 0)
+SUN_DIM = (140, 90, 0)          # twinkling ray frame
+MOON = (235, 235, 205)
 RAIN = (60, 120, 255)
 SNOW = (255, 255, 255)
 BOLT = (255, 230, 0)
+FOG = (150, 150, 165)
 HI = (255, 90, 60)
 LO = (90, 140, 255)
 CLOCK = (120, 200, 255)
@@ -34,66 +40,203 @@ def clear(d, w, h):
 
 def kind_of(code):
     if code in (0, 1):
-        return "sun"
-    if code in (2, 3, 45, 48):
+        return "clear"
+    if code == 2:
+        return "partly"
+    if code == 3:
         return "cloud"
+    if code in (45, 48):
+        return "fog"
     if code >= 95:
         return "storm"
+    if code in (85, 86):
+        return "snow"
+    if code >= 80:
+        return "showers"
+    if code == 75:
+        return "heavysnow"
     if code >= 71:
         return "snow"
+    if code == 65:
+        return "heavyrain"
+    if code in (51, 53, 55):
+        return "drizzle"
     return "rain"
 
 
 # --- animated weather icon, 10x11 in the left part of the matrix -----------
+# Hand-drawn 10x11 pixel icons (tuned visually in the sim), animated per kind:
+# twinkling sun rays and stars, shaded cloud underside, drifting fog bands,
+# falling rain/snow streaks, flashing bolt.
 
 # Cloud occupies rows 1..6, leaving rows 7..10 for precipitation: FALL_ROWS
 # rows of falling drops, staggered per column so they never move in lockstep.
-# y = CLOUD_BOTTOM + (frame + phase) % FALL_ROWS increases every tick and
-# wraps at the bottom -> drops always fall down and respawn at the top.
-# (Previously the tick was taken mod 4 but the row mod 3, so drops jumped up on
-# wrap, and x=2,5,8 are all 2 mod 3, so every column shared one phase.)
+# y = CLOUD_BOTTOM + (frame//speed + phase) % FALL_ROWS increases every tick
+# and wraps at the bottom -> drops always fall down and respawn at the top.
 CLOUD_BOTTOM = 7
 FALL_ROWS = 4  # rows 7..10
 
+# 10-wide cloud silhouette as (y, x_from, x_to, color): two puffs on top,
+# flat bottom row shaded — a flat bottom (not a pinched one) is what keeps it
+# reading as a cloud rather than a mushroom.
+CLOUD_ROWS = (
+    (1, 3, 4, CLOUD),
+    (1, 6, 7, CLOUD),
+    (2, 2, 8, CLOUD),
+    (3, 1, 8, CLOUD),
+    (4, 1, 8, CLOUD),
+    (5, 1, 8, CLOUD),
+    (6, 1, 8, CLOUD_SHADE),
+)
 
-def draw_icon(d, code, frame, ox=0, oy=0):
-    kind = kind_of(code)
-    if kind == "sun":
-        d.set_pen(d.create_pen(255, 200, 0))
-        d.rectangle(ox + 3, oy + 4, 4, 4)  # core
-        rays = ((5, 1), (5, 9), (1, 6), (9, 6), (2, 3), (8, 3), (2, 9), (8, 9))
-        for i, (x, y) in enumerate(rays):
-            # twinkle: alternate rays dim/bright
-            d.set_pen(d.create_pen(255, 200 if (i + frame) % 2 == 0 else 60, 0))
+# Same cloud pushed right/down for partly cloudy, so the sun/moon peeks out.
+PARTLY_CLOUD_ROWS = (
+    (3, 5, 6, CLOUD),
+    (3, 8, 9, CLOUD),
+    (4, 4, 9, CLOUD),
+    (5, 3, 9, CLOUD),
+    (6, 3, 9, CLOUD),
+    (7, 3, 9, CLOUD_SHADE),
+)
+
+# 5x5 sun disc (corners cut) as (y, x_from, x_to), rows 3..7.
+SUN_CORE_ROWS = ((3, 3, 5), (4, 2, 6), (5, 2, 6), (6, 2, 6), (7, 3, 5))
+SUN_RAYS = ((4, 1), (4, 9), (0, 5), (9, 5), (1, 2), (8, 2), (1, 8), (8, 8))
+
+# Small 3x3 sun peeking out top-left for partly cloudy day.
+SMALL_SUN_CORE_ROWS = ((1, 1, 3), (2, 1, 3), (3, 1, 3))
+SMALL_SUN_RAYS = ((2, 0), (0, 2), (4, 2))
+
+# Crescent moon (clear night) and its twinkling stars.
+MOON_PX = ((4, 2), (5, 2), (3, 3), (6, 3), (3, 4), (3, 5), (3, 6), (6, 6),
+           (4, 7), (5, 7))
+MOON_STARS = ((8, 1), (1, 9))
+
+# Small crescent for partly cloudy night, top-left.
+SMALL_MOON_PX = ((2, 0), (3, 0), (1, 1), (4, 1), (1, 2), (1, 3), (4, 3),
+                 (2, 4), (3, 4))
+
+# Lightning bolt, rows 7..10 (flashes on alternate frames).
+BOLT_PX = ((6, 7), (5, 8), (4, 9), (5, 9), (4, 10))
+
+
+def _rows(d, ox, oy, rows, dx=0, dy=0):
+    for (y, xa, xb, col) in rows:
+        d.set_pen(d.create_pen(*col))
+        d.rectangle(ox + xa + dx, oy + y + dy, xb - xa + 1, 1)
+
+
+def _cloud(d, ox, oy, dark=False):
+    rows = []
+    for (y, xa, xb, col) in CLOUD_ROWS:
+        if dark and col == CLOUD:
+            col = STORM_CLOUD
+        rows.append((y, xa, xb, col))
+    _rows(d, ox, oy, rows)
+
+
+def _sun(d, ox, oy, frame):
+    _rows(d, ox, oy, [(y, xa, xb, SUN) for (y, xa, xb) in SUN_CORE_ROWS])
+    for i, (x, y) in enumerate(SUN_RAYS):
+        # twinkle: alternate rays dim/bright
+        d.set_pen(d.create_pen(*(SUN if (i + frame) % 2 == 0 else SUN_DIM)))
+        d.pixel(ox + x, oy + y)
+
+
+def _small_sun(d, ox, oy, frame):
+    _rows(d, ox, oy, [(y, xa, xb, SUN) for (y, xa, xb) in SMALL_SUN_CORE_ROWS])
+    for i, (x, y) in enumerate(SMALL_SUN_RAYS):
+        d.set_pen(d.create_pen(*(SUN if (i + frame) % 2 == 0 else SUN_DIM)))
+        d.pixel(ox + x, oy + y)
+
+
+def _moon(d, ox, oy, frame):
+    d.set_pen(d.create_pen(*MOON))
+    for (x, y) in MOON_PX:
+        d.pixel(ox + x, oy + y)
+    for i, (x, y) in enumerate(MOON_STARS):
+        if (i + frame) % 2 == 0:  # stars twinkle
+            d.set_pen(d.create_pen(*SNOW))
             d.pixel(ox + x, oy + y)
+
+
+def _small_moon(d, ox, oy):
+    d.set_pen(d.create_pen(*MOON))
+    for (x, y) in SMALL_MOON_PX:
+        d.pixel(ox + x, oy + y)
+
+
+def _fog(d, ox, oy, frame):
+    # three 8-px bands drifting right, wrapping at the icon edge
+    d.set_pen(d.create_pen(*FOG))
+    for r, y in enumerate((7, 8, 9)):
+        xa = (frame // 2 + r * 2) % 3
+        d.rectangle(ox + xa, oy + y, 8, 1)
+
+
+def _fall(d, ox, oy, frame, cols, color, speed=1, streak=1):
+    d.set_pen(d.create_pen(*color))
+    for i, x in enumerate(cols):
+        top = (frame // speed + i) % FALL_ROWS
+        for s in range(streak):
+            if top + s < FALL_ROWS:  # streak exits at the bottom, then respawns
+                d.pixel(ox + x, oy + CLOUD_BOTTOM + top + s)
+
+
+def draw_icon(d, code, frame, ox=0, oy=0, is_day=1):
+    kind = kind_of(code)
+    if kind == "clear":
+        if is_day:
+            _sun(d, ox, oy, frame)
+        else:
+            _moon(d, ox, oy, frame)
         return
-    d.set_pen(d.create_pen(*CLOUD))
-    d.rectangle(ox + 1, oy + 3, 8, 4)   # cloud body, rows 3..6
-    d.rectangle(ox + 3, oy + 1, 4, 2)   # puff, rows 1..2
-    if kind == "rain":
-        d.set_pen(d.create_pen(*RAIN))
-        for i, x in enumerate((2, 5, 8)):
-            d.pixel(ox + x, oy + CLOUD_BOTTOM + (frame + i) % FALL_ROWS)
-    elif kind == "snow":
-        d.set_pen(d.create_pen(*SNOW))
-        for i, x in enumerate((2, 4, 6, 8)):
-            d.pixel(ox + x, oy + CLOUD_BOTTOM + (frame // 2 + i) % FALL_ROWS)
-    elif kind == "storm":
+    if kind == "partly":
+        if is_day:
+            _small_sun(d, ox, oy, frame)
+        else:
+            _small_moon(d, ox, oy)
+        _rows(d, ox, oy, PARTLY_CLOUD_ROWS)
+        return
+    if kind == "cloud":
+        _cloud(d, ox, oy)
+        return
+    if kind == "fog":
+        _cloud(d, ox, oy)
+        _fog(d, ox, oy, frame)
+        return
+    # precipitating kinds: cloud (dark for storm) + animated drops
+    _cloud(d, ox, oy, dark=(kind == "storm"))
+    if kind == "storm":
         if frame % 2 == 0:
             d.set_pen(d.create_pen(*BOLT))
-            for x, y in ((5, 7), (4, 8), (6, 9), (5, 10)):
+            for (x, y) in BOLT_PX:
                 d.pixel(ox + x, oy + y)
+        _fall(d, ox, oy, frame, (2, 8), RAIN, speed=2)
+    elif kind == "drizzle":
+        _fall(d, ox, oy, frame, (3, 6), RAIN, speed=2)
+    elif kind == "heavyrain":
+        _fall(d, ox, oy, frame, (1, 3, 5, 7, 9), RAIN, streak=2)
+    elif kind == "showers":
+        if frame % 6 < 4:  # intermittent
+            _fall(d, ox, oy, frame, (2, 5, 8), RAIN, streak=2)
+    elif kind == "heavysnow":
+        _fall(d, ox, oy, frame, (1, 3, 5, 7, 9), SNOW, speed=2)
+    elif kind == "snow":
+        _fall(d, ox, oy, frame, (2, 4, 6, 8), SNOW, speed=2)
+    else:  # rain
+        _fall(d, ox, oy, frame, (2, 4, 6, 8), RAIN, streak=2)
 
 
 # --- screens ---------------------------------------------------------------
 
-def draw_weather(d, w, h, code, temp_text, frame):
+def draw_weather(d, w, h, code, temp_text, frame, is_day=1):
     """Icon + temperature as one group, centered so no space is wasted right."""
     icon_w = 10
     gap = 3
     text_w = d.measure_text(temp_text, 1)
     x0 = (w - (icon_w + gap + text_w)) // 2
-    draw_icon(d, code, frame, ox=x0, oy=0)
+    draw_icon(d, code, frame, ox=x0, oy=0, is_day=is_day)
     d.set_pen(d.create_pen(*WHITE))
     d.text(temp_text, x0 + icon_w + gap, TEXT_Y, scale=1)
 

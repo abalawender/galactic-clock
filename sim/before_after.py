@@ -20,9 +20,16 @@ Driving render.py with synthetic 0..n frames would hide device-only bugs.
     # when the base ref can render that screen)
 
 Screens live in SCREENS below; each entry maps a name to a draw_* call and a
-frame count. Weather values are samples — the sim never reads secrets.py.
+frame count. The special "icons" screen is a contact sheet of every weather
+icon (WMO code x day/night) in one animated GIF — the quickest way to eyeball
+icon changes. Weather values are samples — the sim never reads secrets.py.
+
+Screens whose "before" is pixel-identical to "after" (unchanged by the PR)
+produce no GIFs at all, so the CI upload and the PR comment skip them
+entirely — the review only shows what actually changed.
 """
 import argparse
+import inspect
 import os
 import subprocess
 import sys
@@ -62,6 +69,35 @@ WEATHER_FUNC = "draw_weather"
 WEATHER_FRAMES = 16
 WEATHER_SECONDS = 9.0  # loop shows 5s clock first, then weather at 0.15s/frame
 
+# "icons" contact sheet: (WMO code, is_day) entries — all day kinds plus the
+# two night variants. Drawn with each side's own render.py, so the compare GIF
+# shows old vs new icons for every kind in one animation.
+ICON_ENTRIES = ((0, 1), (2, 1), (3, 1), (45, 1), (51, 1), (61, 1), (65, 1),
+                (71, 1), (80, 1), (95, 1), (0, 0), (2, 0))
+ICON_FRAMES = 8
+ICON_COLS = 4
+ICON_CELL = 11  # icons are 10x11 + 1 px gap
+
+
+def render_icons(R, entries, n):
+    """n frames of a contact sheet of draw_icon over `entries`, using module R."""
+    day_aware = "is_day" in inspect.signature(R.draw_icon).parameters
+    rows = (len(entries) + ICON_COLS - 1) // ICON_COLS
+    w, h = ICON_COLS * ICON_CELL, rows * ICON_CELL
+    out = []
+    for f in range(n):
+        d = simmod.SimGraphics(w, h)
+        R.clear(d, w, h)
+        for i, (code, is_day) in enumerate(entries):
+            ox = (i % ICON_COLS) * ICON_CELL
+            oy = (i // ICON_COLS) * ICON_CELL
+            if day_aware:
+                R.draw_icon(d, code, f, ox, oy, is_day=is_day)
+            else:  # older render.py without day/night icons
+                R.draw_icon(d, code, f, ox, oy)
+        out.append(d.fb)
+    return out
+
 
 def render_frames(R, screen, n):
     fn = SCREENS[screen][0]
@@ -86,19 +122,50 @@ def load_render_at(ref):
 
 
 def stack(a, b):
+    """Vertically stack two frame lists (dims inferred from the frames)."""
+    h, w = len(a[0]), len(a[0][0])
     n = max(len(a), len(b))
-    black = [[(0, 0, 0)] * W for _ in range(H)]
-    sep = [[(30, 30, 30)] * W]
-    return [(a[i] if i < len(a) else black) + sep +
-            (b[i] if i < len(b) else black) for i in range(n)]
+    black = [[(0, 0, 0)] * w for _ in range(h)]
+    sep = [[(30, 30, 30)] * w]
+    frames = [(a[i] if i < len(a) else black) + sep +
+              (b[i] if i < len(b) else black) for i in range(n)]
+    return frames, w, h
+
+
+def write_screen_gifs(out, screen, after, before, ref, scale, delay_ms):
+    """Write the review GIFs for one screen; return a status line for the log.
+
+    before=None     -> after-only (the base ref cannot render this screen)
+    before==after   -> write nothing: an unchanged screen would only add
+                       duplicate GIFs to the PR review, so no files are
+                       produced and the CI upload/comment skips it entirely
+    otherwise       -> after + before + compare (stacked, labelled)
+    """
+    if before is not None and len(before) == len(after) and before == after:
+        return ("%s: %d frames, pixel-identical to %s — skipped, no GIFs"
+                % (screen, len(after), ref))
+    write_gif(after, "%s_%s_after.gif" % (out, screen),
+              scale=scale, delay_ms=delay_ms)
+    if before is None:
+        return "%s: after-only (%d frames)" % (screen, len(after))
+    write_gif(before, "%s_%s_before.gif" % (out, screen),
+              scale=scale, delay_ms=delay_ms)
+    stacked, cw, ch = stack(before, after)
+    labels = [(4, 4, "before @ %s" % ref),
+              (4, (ch + 1) * scale + 4, "after @ HEAD")]
+    write_gif(stacked, "%s_%s_compare.gif" % (out, screen),
+              scale=scale, delay_ms=delay_ms, texts=labels)
+    return ("%s: compared %d vs %d frames, pixel-identical=False"
+            % (screen, len(before), len(after)))
 
 
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ref", default="main", help="git ref for the 'before' side")
-    ap.add_argument("--screens", default="weather," + ",".join(SCREENS) + ",rotation",
-                    help="comma-separated subset of: weather,%s,rotation"
+    ap.add_argument("--screens",
+                    default="weather,icons," + ",".join(SCREENS) + ",rotation",
+                    help="comma-separated subset of: weather,icons,%s,rotation"
                          % ",".join(SCREENS))
     ap.add_argument("--scale", type=int, default=8)
     ap.add_argument("--delay", type=float, default=0.2)
@@ -120,8 +187,6 @@ def main():
             # whole main-loop run with hardware/internet/time mocked — robust
             # to any screen changes, since nothing app-level is hard-coded
             after = run_main.run_current(ROTATION_SECONDS)
-            write_gif(after, "%s_rotation_after.gif" % args.out,
-                      scale=args.scale, delay_ms=delay_ms)
             before = None
             try:
                 before = run_main.run_at(args.ref, ROTATION_SECONDS)
@@ -130,18 +195,9 @@ def main():
                       % (args.ref, e))
             if before is not None:
                 m = min(len(before), len(after))
-                before = before[:m]
-                write_gif(before, "%s_rotation_before.gif" % args.out,
-                          scale=args.scale, delay_ms=delay_ms)
-                labels = [(4, 4, "before @ %s" % args.ref),
-                          (4, (H + 1) * args.scale + 4, "after @ HEAD")]
-                write_gif(stack(before, after[:m]),
-                          "%s_rotation_compare.gif" % args.out,
-                          scale=args.scale, delay_ms=delay_ms, texts=labels)
-                print("rotation: compared %d vs %d frames, pixel-identical=%s"
-                      % (m, len(after), before == after[:m]))
-            else:
-                print("rotation: after-only (%d frames)" % len(after))
+                before, after = before[:m], after[:m]
+            print(write_screen_gifs(args.out, "rotation", after, before,
+                                    args.ref, args.scale, delay_ms))
             continue
         before = None
         if screen == "weather":
@@ -154,6 +210,15 @@ def main():
             except Exception as e:
                 print("weather: before unavailable at %s (%s) — after-only"
                       % (args.ref, e))
+        elif screen == "icons":
+            after = render_icons(render, ICON_ENTRIES, ICON_FRAMES)
+            before = None
+            if R_base is not None:
+                try:
+                    before = render_icons(R_base, ICON_ENTRIES, ICON_FRAMES)
+                except Exception as e:
+                    print("icons: before unavailable at %s (%s) — after-only"
+                          % (args.ref, e))
         elif screen in SCREENS:
             n = SCREENS[screen][1]
             after = render_frames(render, screen, n)
@@ -164,23 +229,10 @@ def main():
                     print("%s: before unavailable at %s (%s) — after-only"
                           % (screen, args.ref, e))
         else:
-            raise SystemExit("unknown screen: %s (have: weather,%s,rotation)"
+            raise SystemExit("unknown screen: %s (have: weather,icons,%s,rotation)"
                              % (screen, ",".join(SCREENS)))
-        write_gif(after, "%s_%s_after.gif" % (args.out, screen),
-                  scale=args.scale, delay_ms=delay_ms)
-        if before is not None:
-            write_gif(before, "%s_%s_before.gif" % (args.out, screen),
-                      scale=args.scale, delay_ms=delay_ms)
-            labels = [(4, 4, "before @ %s" % args.ref),
-                      (4, (H + 1) * args.scale + 4, "after @ HEAD")]
-            write_gif(stack(before, after),
-                      "%s_%s_compare.gif" % (args.out, screen),
-                      scale=args.scale, delay_ms=delay_ms, texts=labels)
-            same = (len(before) == len(after) and before == after)
-            print("%s: compared %d vs %d frames, pixel-identical=%s"
-                  % (screen, len(before), len(after), same))
-        else:
-            print("%s: after-only (%d frames)" % (screen, len(after)))
+        print(write_screen_gifs(args.out, screen, after, before,
+                                args.ref, args.scale, delay_ms))
     return 0
 
 
