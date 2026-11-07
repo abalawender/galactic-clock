@@ -151,7 +151,6 @@ python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
 
 ## License & contributing
 
-MIT — see [LICENSE](LICENSE). Contributions welcome — see
-[CONTRIBUTING.md](CONTRIBUTING.md): branch off `micropython`, keep commits
-small and atomic, and CI will run the tests and post before/after GIF
-previews inline on your PR.
+MIT — see [LICENSE](LICENSE). Contributions (mostly AI agents) follow
+[AGENTS.md](AGENTS.md): branch off `micropython` with small atomic commits,
+and CI will run the tests and post before/after GIF previews inline on the PR.

@@ -46,6 +46,26 @@ hi/lo screen.
   `python3 sim/before_after.py --ref main --out /tmp/pr`
   → attach e.g. `/tmp/pr_weather_compare.gif` to the PR.
 
+## Pull requests
+
+Most contributions here come from agents — this file is the contract:
+
+1. Branch off `micropython`: `git checkout -b feat/my-change micropython`
+   (`fix/...` for fixes). Never push to `main`/`micropython` directly.
+2. Clean commit queue: small, atomic commits, one logical change each,
+   `<type>: <what>` messages (`feat:`, `fix:`, `docs:`, `refactor:`, `tests:`,
+   `ci:`, `scripts:`) — see `git log` for examples.
+3. Before pushing, run `python3 -m unittest discover -s tests -v` and preview
+   any display change in `sim/` (above).
+4. Push the branch and open the PR against `micropython`. CI
+   (`.github/workflows/pr-sim.yml`, triggered by changes to `main.py`/`src/`/
+   `sim/`/`tests/`) runs the tests and posts before/after GIFs of every changed
+   screen inline on the PR (artifact `sim-before-after`; screens pixel-identical
+   to the base produce no GIFs). For icon changes, also do a HITL pass on the
+   physical board: `python3 skills/display/display.py --icons` after
+   `scripts/deploy.sh --no-reset` (so the board runs *your* render.py), then
+   `mpremote reset` to return to the clock.
+
 ## Layout
 
 - `main.py` — board entry point (WiFi/NTP/open-meteo/SCD41 + screen loop), thin
@@ -64,5 +84,4 @@ hi/lo screen.
 `main`, `micropython` (PR target — active work happens on short-lived
 `feat/*` / `fix/*` branches merged into it), plus `tts`.
 Check `git branch` before committing; do not push without asking.
-External contributors: `CONTRIBUTING.md` (branch off `micropython`, open a PR —
-CI runs the tests and posts before/after GIF previews on the PR).
+PR flow: see "Pull requests" above.
