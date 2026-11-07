@@ -29,7 +29,6 @@ produce no GIFs at all, so the CI upload and the PR comment skip them
 entirely — the review only shows what actually changed.
 """
 import argparse
-import inspect
 import os
 import subprocess
 import sys
@@ -71,32 +70,11 @@ WEATHER_SECONDS = 9.0  # loop shows 5s clock first, then weather at 0.15s/frame
 
 # "icons" contact sheet: (WMO code, is_day) entries — all day kinds plus the
 # two night variants. Drawn with each side's own render.py, so the compare GIF
-# shows old vs new icons for every kind in one animation.
-ICON_ENTRIES = ((0, 1), (2, 1), (3, 1), (45, 1), (51, 1), (61, 1), (65, 1),
-                (71, 1), (80, 1), (95, 1), (0, 0), (2, 0))
+# shows old vs new icons for every kind in one animation. The entries and the
+# grid renderer live in sim.py, shared with `sim.py --screen icons`.
+ICON_ENTRIES = simmod.ICON_ENTRIES
 ICON_FRAMES = 8
-ICON_COLS = 4
-ICON_CELL = 11  # icons are 10x11 + 1 px gap
-
-
-def render_icons(R, entries, n):
-    """n frames of a contact sheet of draw_icon over `entries`, using module R."""
-    day_aware = "is_day" in inspect.signature(R.draw_icon).parameters
-    rows = (len(entries) + ICON_COLS - 1) // ICON_COLS
-    w, h = ICON_COLS * ICON_CELL, rows * ICON_CELL
-    out = []
-    for f in range(n):
-        d = simmod.SimGraphics(w, h)
-        R.clear(d, w, h)
-        for i, (code, is_day) in enumerate(entries):
-            ox = (i % ICON_COLS) * ICON_CELL
-            oy = (i // ICON_COLS) * ICON_CELL
-            if day_aware:
-                R.draw_icon(d, code, f, ox, oy, is_day=is_day)
-            else:  # older render.py without day/night icons
-                R.draw_icon(d, code, f, ox, oy)
-        out.append(d.fb)
-    return out
+render_icons = simmod.render_icons
 
 
 def render_frames(R, screen, n):

@@ -44,8 +44,14 @@ python3 sim/sim.py print  --screen weather --code 61 --temp 21 --frames 8
                               # plain ASCII frames on stdout (for agent analysis)
 python3 sim/sim.py play   --screen weather --code 61 --temp 21   # animate in terminal
 python3 sim/sim.py play   --screen weather --code 0 --night      # moon + stars
+python3 sim/sim.py play   --screen icons --frames 8              # contact sheet: all icons
 python3 sim/sim.py play   --screen hilo --hi 25 --lo 18
 ```
+
+HITL review on the physical board (see all icons before approving a PR):
+`python3 skills/display/display.py --icons` cycles every weather icon on the
+matrix, 3 s each, WMO code labelled (`n` = night); then `--stop` and
+`mpremote reset` return to the clock.
 
 The weather icon (10x11, left of the temperature) is animated per WMO code:
 twinkling sun/moon, partly-cloudy sun+moon peeking behind a drifting cloud,

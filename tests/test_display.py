@@ -128,12 +128,12 @@ class TestLayout(unittest.TestCase):
 # layout intentionally changes.
 GOLDEN_WEATHER_RAIN_F0 = (
     '                                                     \n'
-    '                 ++ ++                               \n'
-    '                +++++++                              \n'
-    '               ++++++++    @@@  @@  @@@              \n'
-    '               ++++++++       @  @ @                 \n'
-    '               ++++++++     @@   @ @                 \n'
-    '               --------    @     @ @                 \n'
+    '               +++  @@                               \n'
+    '              ++++@@@@@                              \n'
+    '              +++@@@@@@@   @@@  @@  @@@              \n'
+    '               +@@@=@@@@      @  @ @                 \n'
+    '                @@@@=@@@    @@   @ @                 \n'
+    '                 @@@@@@    @     @ @                 \n'
     '                =          @@@@  @  @@@              \n'
     '                = =                                  \n'
     '                  = =                                \n'
@@ -253,6 +253,13 @@ class TestTZ(unittest.TestCase):
 
 class TestBeforeAfter(unittest.TestCase):
     """sim/before_after.py: icon contact sheet + vertical stacking."""
+
+    def test_icons_entries_shared_with_sim(self):
+        import sim as simmod
+        import before_after
+        self.assertIs(before_after.ICON_ENTRIES, simmod.ICON_ENTRIES)
+        self.assertIs(before_after.render_icons, simmod.render_icons)
+        self.assertEqual(len(before_after.ICON_ENTRIES), 12)  # 10 day + 2 night
 
     def test_icons_grid_shape_and_animation(self):
         import before_after
