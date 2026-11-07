@@ -291,6 +291,22 @@ class TestBeforeAfter(unittest.TestCase):
             self.assertEqual(os.listdir(td), [])  # nothing written at all
 
 
+class TestDemoGif(unittest.TestCase):
+    """docs/demo-rotation.gif must match what the current code renders — CI on
+    push to micropython enforces this via sim/check_demo_gif.py; this test runs
+    the same comparison locally (needs Pillow, skipped without it)."""
+
+    def setUp(self):
+        try:
+            import PIL  # noqa: F401
+        except ImportError:
+            self.skipTest("Pillow not installed")
+
+    def test_demo_gif_matches_code(self):
+        import check_demo_gif
+        self.assertEqual(check_demo_gif.check(), [])
+
+
 class TestRunMainMocked(unittest.TestCase):
     """The real main.py under full mocks (hardware/internet/time stubbed)."""
 

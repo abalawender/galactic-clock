@@ -1,0 +1,38 @@
+name: micropython-check
+
+# On every push to micropython: the unit tests must pass, and the tracked README
+# demo GIF (docs/demo-rotation.gif) must still match what the merged code
+# renders — sim/check_demo_gif.py re-renders the frames and compares decoded
+# pixels. If a PR changes rendering, regenerate the GIF in that same PR:
+#   python3 sim/run_main.py --seconds 18 --delay 0.12 --gif docs/demo-rotation.gif
+
+on:
+  push:
+    branches: [micropython]
+    paths:
+      - main.py
+      - src/**
+      - sim/**
+      - tests/**
+      - docs/demo-rotation.gif
+      - .github/workflows/micropython-check.yml
+
+permissions: {}  # read-only: this workflow only runs tests and compares files
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pillow
+
+      - name: unit tests (bitmaps, golden ASCII, tz, mocked main loop, demo GIF)
+        run: python3 -m unittest discover -s tests -v
+
+      - name: demo GIF matches the merged code
+        run: python3 sim/check_demo_gif.py
