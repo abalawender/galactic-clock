@@ -25,6 +25,14 @@ python3 skills/display/display.py --stop           # interrupt animation and cle
 # after --icons, `mpremote reset` reboots the board back into main.py (weather clock)
 ```
 
+## Gotcha: `--icons` shows the *deployed* render.py
+
+The on-board snippet does `import render`, which resolves to the flashed
+`/render.py`, not the working tree. After changing `src/render.py`, deploy
+first (`scripts/deploy.sh --no-reset`), then run `--icons`; afterwards
+`--stop` + `mpremote reset` return to the weather clock. Host-only alternative
+that always uses the working tree: `python3 sim/sim.py play --screen icons`.
+
 ## How it works
 
 `display.py` in this folder builds a MicroPython snippet and runs it on the
