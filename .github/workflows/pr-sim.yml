@@ -87,7 +87,7 @@ jobs:
             | while read -r name; do
                 [ -n "$name" ] || continue
                 aid=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/pr-sim-assets" \
-                  --jq --raw-field "n=$name" '.assets[] | select(.name == $n) | .id')
+                  --jq -f "n=$name" '.assets[] | select(.name == $n) | .id')
                 [ -n "$aid" ] || continue
                 gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$aid" > /dev/null
               done
