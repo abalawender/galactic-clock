@@ -46,6 +46,7 @@ jobs:
           name: sim-before-after
           path: /tmp/pr_*.gif
           retention-days: 14
+          if-no-files-found: ignore  # docs-only PRs change no screens -> no GIFs
 
       # Upload the *_compare.gif files as assets of a hidden prerelease via the
       # gh CLI (reference implementation of the upload protocol), then comment
@@ -61,6 +62,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -x
+          shopt -s nullglob  # an unmatched glob must not reach cp as a literal name
           gh release create pr-sim-assets --prerelease --title pr-sim-assets \
             --notes 'hidden asset store for pr-sim inline GIFs' --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
           # the tag was auto-created on the default branch (main) by the first
