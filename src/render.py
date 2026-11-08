@@ -326,13 +326,19 @@ def draw_hilo(d, w, h, hi_text, lo_text):
     d.text(lo_text, x2 + 3 + arrow_gap, TEXT_Y, scale=1)
 
 
-def draw_co2(d, w, h, ppm, temp_c, rh):
-    """CO2 ppm + sensor temp + RH as one centered line, color-coded by CO2
-    level. SCD41 accuracy: CO2 ±(40 ppm + 5%); integrated SHT4x-class RH/T
-    roughly ±6 %RH / ±0.8 °C typ (derated by self-heating)."""
-    text = "%d %dC %d%%" % (ppm, round(temp_c), round(rh))
+def draw_co2(d, w, h, ppm):
+    """CO2 reading in ppm as one centered text group, color-coded by level."""
+    text = "CO2 %d" % ppm
     x = (w - d.measure_text(text, 1)) // 2
     d.set_pen(d.create_pen(*co2_color(ppm)))
+    d.text(text, x, TEXT_Y, scale=1)
+
+
+def draw_als(d, w, h, mn, mx, avg):
+    """Debug screen: min/max/avg of the last ALS samples, one centered line."""
+    text = "%d %d %d" % (mn, mx, avg)
+    x = (w - d.measure_text(text, 1)) // 2
+    d.set_pen(d.create_pen(*MSG))
     d.text(text, x, TEXT_Y, scale=1)
 
 

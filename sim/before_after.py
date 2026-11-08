@@ -58,7 +58,7 @@ def _hilo(d, R, f):
 
 
 def _co2(d, R, f):
-    R.draw_co2(d, W, H, 812, 21.5, 45.0)
+    R.draw_co2(d, W, H, 812)
 
 
 def _boot(d, R, f):

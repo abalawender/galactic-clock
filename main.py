@@ -169,11 +169,11 @@ def show_hilo(wx, seconds):
         time.sleep(0.2)
 
 
-def show_co2(ppm, temp_c, rh, seconds):
+def show_co2(ppm, seconds):
     end = time.time() + seconds
     while time.time() < end:
         render.clear(d, W, H)
-        render.draw_co2(d, W, H, ppm, temp_c, rh)
+        render.draw_co2(d, W, H, ppm)
         gu.update(d)
         time.sleep(0.2)
 
@@ -272,8 +272,8 @@ def main():
             else:
                 show_text("no weather", 5)
             if sensor is not None and sensor.ready():
-                co2, temp_c, rh = sensor.measure()
-                show_co2(co2, temp_c, rh, 5)
+                co2, _temp, _rh = sensor.measure()
+                show_co2(co2, 5)
                 co2_alarm(co2)
             log_sys()
         except Exception as e:
