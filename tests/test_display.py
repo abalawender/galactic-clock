@@ -156,11 +156,11 @@ GOLDEN_CO2 = (
     '                                                     \n'
     '                                                     \n'
     '                                                     \n'
-    ' **** ** ***      ***  ***   ***     *  *  **** *   *\n'
-    '*   *  *    *        *    * *        *  *  *       * \n'
-    ' ***   *  **       **   **  *        *  *  ***    *  \n'
-    '*   *  * *        *    *    *         ****    *  *   \n'
-    ' ***   * ****     **** ****  ***        *  ***  *   *\n'
+    '           ***  **** ***       **** ** ***           \n'
+    '          *    *   *    *     *   *  *    *          \n'
+    '          *    *   *  **       ***   *  **           \n'
+    '          *    *   * *        *   *  * *             \n'
+    '           ***  ***  ****      ***   * ****          \n'
     '                                                     \n'
     '                                                     \n'
     '                                                     '
@@ -194,7 +194,7 @@ class TestGolden(unittest.TestCase):
         self.assertEqual(ascii_of(fb), GOLDEN_CLOCK)
 
     def test_co2(self):
-        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812, 21.5, 45.0))
+        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812))
         self.assertEqual(ascii_of(fb), GOLDEN_CO2)
 
 
@@ -202,14 +202,14 @@ class TestCO2(unittest.TestCase):
     """SCD41 CO2 screen: centered, color encodes indoor air quality."""
 
     def test_co2_centered(self):
-        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812, 21.5, 45.0))
+        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812))
         lo, hi = margins(fb)
         self.assertEqual(lo, hi, "co2 off-center: %s" % ((lo, hi),))
 
     def test_co2_color_buckets(self):
         for ppm, want in ((700, render.CO2_OK), (900, render.CO2_WARN),
                           (1300, render.CO2_BAD)):
-            fb = frame(lambda d, f: render.draw_co2(d, W, H, ppm, 21.5, 45.0))
+            fb = frame(lambda d, f: render.draw_co2(d, W, H, ppm))
             lit = {p for row in fb for p in row if p != (0, 0, 0)}
             self.assertEqual(lit, {want}, "ppm %d -> %s, want %s"
                              % (ppm, lit, want))
