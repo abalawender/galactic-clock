@@ -423,6 +423,23 @@ class TestRunMainMocked(unittest.TestCase):
             run_main.CANNED_LIGHT = 2048.0
         self.assertEqual(run_main.FakeChannel.beeps, 0)
 
+    def test_co2_alarm_threshold_is_red_level(self):
+        # the audible alarm must fire exactly at the ppm level that turns
+        # the CO2 font red (render.CO2_RED_PPM)
+        for ppm, want_beeps in ((render.CO2_RED_PPM, True),
+                                (render.CO2_RED_PPM - 1, False)):
+            run_main.CANNED_CO2 = ppm
+            run_main.CANNED_LIGHT = 100.0
+            run_main.FakeChannel.beeps = 0
+            try:
+                run_main.run_current(22.0)
+            finally:
+                run_main.CANNED_CO2 = 812
+                run_main.CANNED_LIGHT = 2048.0
+            self.assertEqual(run_main.FakeChannel.beeps > 0, want_beeps,
+                             "ppm=%s beeps=%s want %s"
+                             % (ppm, run_main.FakeChannel.beeps, want_beeps))
+
     def test_run_main_wrappers_preserve_signatures(self):
         # before_after.render_icons detects day/night via inspect.signature;
         # run_main's wrappers must not hide is_day (regression: after-side

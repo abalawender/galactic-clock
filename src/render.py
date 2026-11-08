@@ -30,9 +30,11 @@ HI = (255, 90, 60)
 LO = (90, 140, 255)
 CLOCK = (120, 200, 255)
 MSG = (255, 160, 40)
-CO2_OK = (80, 220, 80)    # < 800 ppm
-CO2_WARN = (255, 200, 0)  # < 1200 ppm
-CO2_BAD = (255, 60, 60)   # >= 1200 ppm
+CO2_WARN_PPM = 800   # at/above this the CO2 font goes amber
+CO2_RED_PPM = 1200   # at/above this it goes red — and the audible alarm fires
+CO2_OK = (80, 220, 80)
+CO2_WARN = (255, 200, 0)
+CO2_BAD = (255, 60, 60)
 
 TEXT_Y = 2
 
@@ -343,10 +345,11 @@ def draw_als(d, w, h, mn, mx, avg):
 
 
 def co2_color(ppm):
-    """Indoor air quality: green < 800 ppm, amber < 1200, red above."""
-    if ppm < 800:
+    """Indoor air quality: green below CO2_WARN_PPM, amber below
+    CO2_RED_PPM, red at/above CO2_RED_PPM."""
+    if ppm < CO2_WARN_PPM:
         return CO2_OK
-    if ppm < 1200:
+    if ppm < CO2_RED_PPM:
         return CO2_WARN
     return CO2_BAD
 

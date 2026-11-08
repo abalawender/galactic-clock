@@ -182,7 +182,8 @@ def show_co2(ppm, seconds, alarm=False):
         time.sleep(0.2)
 
 
-CO2_ALARM_PPM = 1200   # SCD41 CO2 accuracy ±(40 ppm + 5%) — threshold is soft
+# the audible alarm fires at render.CO2_RED_PPM — the same level that turns
+# the CO2 font red. SCD41 accuracy is ±(40 ppm + 5%), so the threshold is soft.
 ALS_ALARM_MIN = 20     # gu.light() raw 0..4095; dark room established < 20, office lights 20-40
 
 alarm_chs = None
@@ -195,7 +196,7 @@ def co2_alarm(ppm):
     be started with gu.play_synth() or nothing is audible, a triggered
     channel sustains until trigger_release(), and frequency must be an int."""
     global alarm_chs
-    if ppm < CO2_ALARM_PPM or gu.light() < ALS_ALARM_MIN:
+    if ppm < render.CO2_RED_PPM or gu.light() < ALS_ALARM_MIN:
         return
     if alarm_chs is None:
         alarm_chs = [gu.synth_channel(0), gu.synth_channel(1)]
