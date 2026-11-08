@@ -287,8 +287,10 @@ def main():
                 show_text("no weather", 5)
             if sensor is not None and sensor.ready():
                 co2, _temp, _rh = sensor.measure()
-                show_co2(co2, 5)
+                # beep first, then show the screen — the alarm is heard at
+                # the start of the CO2 screen, leaving the full 5 s to read it
                 co2_alarm(co2)
+                show_co2(co2, 5)
             log_sys()
         except Exception as e:
             print("loop error:", e)
