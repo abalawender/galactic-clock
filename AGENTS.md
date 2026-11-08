@@ -28,7 +28,7 @@ hi/lo screen.
   `mpremote reset`. It fails fast with
   the attach hint if the board is not usbipd-attached (`/dev/ttyACM0` missing).
   File management: `skills/mpremote/SKILL.md`. One-off display snippets:
-  `skills/display/`.
+  `skills/unicorn/`.
 - **Preview display changes in sim/ before deploying** — not as a fallback for
   a detached board, but because you can actually see what the matrix will
   show, using the exact `src/render.py` code and real bitmap6 font metrics:
@@ -68,7 +68,7 @@ Most contributions here come from agents — this file is the contract:
    `sim/`/`tests/`) runs the tests and posts before/after GIFs of every changed
    screen inline on the PR (artifact `sim-before-after`; screens pixel-identical
    to the base produce no GIFs). For icon changes, also do a HITL pass on the
-   physical board: `python3 skills/display/display.py --icons` after
+   physical board: `python3 skills/unicorn/display.py --icons` after
    `scripts/deploy.sh --no-reset` (so the board runs *your* render.py), then
    `mpremote reset` to return to the clock.
    `micropython` is protected by a ruleset: one approving review and all threads
@@ -95,8 +95,8 @@ Most contributions here come from agents — this file is the contract:
   `run_main.py` (mocked full run of main.py), `before_after.py` (PR GIFs)
 - `tests/` — unittest suite, host-only (`python3 -m unittest discover -s tests -v`)
 - `scripts/` — attach.sh, deploy.sh
-- `skills/`, `docs/` — board attach/recovery, flash file management, on-device
-  display snippets, flashing notes
+- `skills/`, `docs/` — board access via mpremote (`mpremote`), the unicorn
+  board itself (`unicorn`), flashing notes
 - `firmware/` — local .uf2 copy (gitignored)
 
 ## Branches

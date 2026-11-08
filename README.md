@@ -94,7 +94,7 @@ python3 sim/sim.py play --screen weather --code 61 --temp 21 --frames 12 --gif /
 ```
 
 HITL review on the physical board (see all icons before approving a PR):
-`python3 skills/display/display.py --icons` cycles every weather icon on the
+`python3 skills/unicorn/display.py --icons` cycles every weather icon on the
 matrix, 3 s each, WMO code labelled (`n` = night); then `--stop` and
 `mpremote reset` return to the clock.
 
@@ -151,9 +151,9 @@ python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
   `before_after.py` (PR review GIFs), `gif.py` (Pillow writer)
 - `tests/` — unittest suite (bitmaps, golden ASCII, tz rules, mocked main loop)
 - `scripts/` — attach.sh, deploy.sh (uploads `main.py` + `render.py` + `tz.py`, resets board)
-- `skills/` — agent skills: board attach/recovery, REPL rules and flash file
-  management (`mpremote`), Galactic Unicorn firmware APIs (`unicorn`),
-  on-device display snippets (`display`)
+- `skills/` — agent skills: board access via mpremote (attach/recovery, REPL
+  rules, flash files) in `mpremote`; the Galactic Unicorn board itself (LED
+  matrix display snippets, frozen `galactic` synth API) in `unicorn`
 - `docs/` — flashing notes, hardware resource inventory (`hardware.md`) + the tracked README demo GIF; `firmware/` — local uf2 copy (gitignored)
 
 ## License & contributing
