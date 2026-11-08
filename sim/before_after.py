@@ -61,13 +61,17 @@ def _co2(d, R, f):
     R.draw_co2(d, W, H, 812)
 
 
+def _als(d, R, f):
+    R.draw_als(d, W, H, 10 + f, 40 + f, 25)
+
+
 def _boot(d, R, f):
     # the whole loading sequence: boot/wifi/ntp/weather, 4 frames per stage
     R.draw_boot(d, W, H, simmod.BOOT_STAGES[min(f // 4, len(simmod.BOOT_STAGES) - 1)], f)
 
 
 SCREENS = {"clock": (_clock, 30), "hilo": (_hilo, 1), "co2": (_co2, 1),
-           "boot": (_boot, 16)}
+           "als": (_als, 1), "boot": (_boot, 16)}
 
 # Weather goes through the real main loop on both sides (see module docstring).
 WEATHER_FUNC = "draw_weather"

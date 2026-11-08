@@ -124,6 +124,8 @@ def make_screen_fn(args):
         return lambda d, f: render.draw_hilo(d, W, H, "%d" % args.hi, "%d" % args.lo)
     if args.screen == "co2":
         return lambda d, f: render.draw_co2(d, W, H, args.ppm)
+    if args.screen == "als":
+        return lambda d, f: render.draw_als(d, W, H, 10, 40, 25)
     if args.screen == "boot":
         # cycle through the real boot stages like main.py does: boot/wifi/ntp/weather
         return lambda d, f: render.draw_boot(
@@ -176,7 +178,7 @@ def main():
                     help="play: animate in terminal; print: plain ASCII frames "
                          "to stdout (no escape codes)")
     ap.add_argument("--screen", default="weather",
-                    choices=["weather", "clock", "hilo", "co2", "boot", "message", "icons"])
+                    choices=["weather", "clock", "hilo", "co2", "als", "boot", "message", "icons"])
     ap.add_argument("--code", type=int, default=61, help="WMO weather code (weather screen)")
     ap.add_argument("--temp", type=int, default=21, help="current temperature C")
     ap.add_argument("--night", action="store_true", help="weather screen: night (moon)")

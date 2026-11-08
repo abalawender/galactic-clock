@@ -216,6 +216,25 @@ def log_sys():
     print("sys: light=%d/4095 temp=%.2fC" % (light, temp_c))
 
 
+ALS_N = 32  # ring of the last 32 ALS samples shown on the debug screen
+als_ring = [0] * ALS_N
+als_i = 0
+
+
+def show_als(seconds):
+    """DEBUG screen: min/max/avg of the last ALS_N gu.light() samples."""
+    global als_i
+    end = time.time() + seconds
+    while time.time() < end:
+        als_ring[als_i] = gu.light()
+        als_i = (als_i + 1) % ALS_N
+        render.clear(d, W, H)
+        render.draw_als(d, W, H, min(als_ring), max(als_ring),
+                        sum(als_ring) // ALS_N)
+        gu.update(d)
+        time.sleep(0.2)
+
+
 def show_text(msg, seconds):
     end = time.time() + seconds
     while time.time() < end:
@@ -265,15 +284,10 @@ def main():
                 except Exception as e:
                     print("weather fetch failed:", e)
                     wx = None
-            show_clock(5)
-            if wx is not None:
-                show_weather(wx, 5)
-                show_hilo(wx, 5)
-            else:
-                show_text("no weather", 5)
+            # DEBUG: the ALS stats screen is the only screen for now
+            show_als(5)
             if sensor is not None and sensor.ready():
                 co2, _temp, _rh = sensor.measure()
-                show_co2(co2, 5)
                 co2_alarm(co2)
             log_sys()
         except Exception as e:
