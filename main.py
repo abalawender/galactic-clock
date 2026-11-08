@@ -181,22 +181,36 @@ def show_co2(ppm, seconds):
 CO2_ALARM_PPM = 1200   # SCD41 CO2 accuracy ±(40 ppm + 5%) — threshold is soft
 ALS_ALARM_MIN = 20     # gu.light() raw 0..4095; dark room established < 20, office lights 20-40
 
-alarm_ch = None
+alarm_chs = None
 
 
 def co2_alarm(ppm):
     """Audible alarm for high CO2, but only when the room has light (i.e.
-    someone is around to hear it). Beeps once per call via the synth."""
-    global alarm_ch
+    someone is around to hear it). Two-voice chirp 660/990/660 Hz: sine on
+    the note (ch0), triangle on its fifth (ch1). Note: the synth output must
+    be started with gu.play_synth() or nothing is audible, a triggered
+    channel sustains until trigger_release(), and frequency must be an int."""
+    global alarm_chs
     if ppm < CO2_ALARM_PPM or gu.light() < ALS_ALARM_MIN:
         return
-    if alarm_ch is None:
-        alarm_ch = gu.synth_channel(0)
-    alarm_ch.configure(waveforms=2, frequency=880, volume=100,
-                       attack=0.01, decay=0.05, sustain=0.5, release=0.1)
-    alarm_ch.trigger_attack()
-    time.sleep(0.3)
-    alarm_ch.trigger_release()
+    if alarm_chs is None:
+        alarm_chs = [gu.synth_channel(0), gu.synth_channel(1)]
+    gu.play_synth()
+    for freq in (660, 990, 660):
+        alarm_chs[0].configure(waveforms=alarm_chs[0].SINE, frequency=freq,
+                               volume=0.16, attack=0.01, decay=0.001,
+                               sustain=1.0, release=0.12)
+        alarm_chs[1].configure(waveforms=alarm_chs[1].TRIANGLE,
+                               frequency=int(freq * 1.5), volume=0.12,
+                               attack=0.01, decay=0.001, sustain=1.0,
+                               release=0.12)
+        alarm_chs[0].trigger_attack()
+        alarm_chs[1].trigger_attack()
+        time.sleep(0.12)
+        alarm_chs[0].trigger_release()
+        alarm_chs[1].trigger_release()
+        time.sleep(0.12)
+    gu.stop_playing()
     print("CO2 ALARM: %d ppm, light %d" % (ppm, gu.light()))
 
 
