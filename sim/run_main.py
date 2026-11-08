@@ -87,6 +87,8 @@ class _Stop(BaseException):
 
 class FakeChannel:
     """Records alarm beeps so tests can assert on them."""
+    # waveform constants, same values as the board's galactic.Channel
+    WAVE, SINE, TRIANGLE, SAW, SQUARE, NOISE = 1, 8, 16, 32, 64, 128
     beeps = 0
 
     def configure(self, **kw):
@@ -156,6 +158,9 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
 
         def synth_channel(self, ch):
             return FakeChannel()
+
+        def play_synth(self):
+            pass
 
         def stop_playing(self):
             pass
