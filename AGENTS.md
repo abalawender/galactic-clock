@@ -102,6 +102,6 @@ Most contributions here come from agents — this file is the contract:
 ## Branches
 
 `main`, `micropython` (PR target — active work happens on short-lived
-`feat/*` / `fix/*` branches merged into it), plus `tts`.
+`feat/*` / `fix/*` branches merged into it).
 Check `git branch` before committing; do not push without asking.
 PR flow: see "Pull requests" above.
