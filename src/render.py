@@ -346,3 +346,22 @@ def co2_color(ppm):
 def draw_message(d, w, h, msg):
     d.set_pen(d.create_pen(*MSG))
     d.text(msg, 4, TEXT_Y, scale=1)
+
+
+# 8 spinner positions around a center pixel
+SPIN = ((1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1))
+
+
+def draw_boot(d, w, h, label, frame):
+    """Boot/loading screen: spinning dot + stage label (wifi/ntp/weather)."""
+    cx, cy = 4, 5
+    d.set_pen(d.create_pen(*MSG))
+    d.pixel(cx, cy)
+    for i, (dx, dy) in enumerate(SPIN):
+        if i == frame % len(SPIN):
+            d.set_pen(d.create_pen(*WHITE))
+        else:
+            d.set_pen(d.create_pen(*MSG))
+        d.pixel(cx + dx, cy + dy)
+    d.set_pen(d.create_pen(*MSG))
+    d.text(label, 10, TEXT_Y, scale=1)
