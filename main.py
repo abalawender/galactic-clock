@@ -169,12 +169,16 @@ def show_hilo(wx, seconds):
         time.sleep(0.2)
 
 
-def show_co2(ppm, seconds):
+def show_co2(ppm, seconds, alarm=False):
     end = time.time() + seconds
+    first = True
     while time.time() < end:
         render.clear(d, W, H)
         render.draw_co2(d, W, H, ppm)
         gu.update(d)
+        if first and alarm:
+            co2_alarm(ppm)  # beep while the first frame is already on screen
+            first = False
         time.sleep(0.2)
 
 
@@ -287,10 +291,9 @@ def main():
                 show_text("no weather", 5)
             if sensor is not None and sensor.ready():
                 co2, _temp, _rh = sensor.measure()
-                # beep first, then show the screen — the alarm is heard at
-                # the start of the CO2 screen, leaving the full 5 s to read it
-                co2_alarm(co2)
-                show_co2(co2, 5)
+                # alarm fires inside show_co2 right after the first frame,
+                # so the beep overlaps the screen instead of preceding it
+                show_co2(co2, 5, alarm=True)
             log_sys()
         except Exception as e:
             print("loop error:", e)
