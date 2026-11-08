@@ -99,6 +99,9 @@ class SimGraphics:
 
 RAMP = " .:-=+*#%@"
 
+# boot stages in order, as ticked by main.py (4 frames each in the boot GIF)
+BOOT_STAGES = ("boot", "wifi", "ntp", "weather")
+
 
 def frame_to_text(fb):
     lines = []
@@ -121,6 +124,10 @@ def make_screen_fn(args):
         return lambda d, f: render.draw_hilo(d, W, H, "%d" % args.hi, "%d" % args.lo)
     if args.screen == "co2":
         return lambda d, f: render.draw_co2(d, W, H, args.ppm)
+    if args.screen == "boot":
+        # cycle through the real boot stages like main.py does: boot/wifi/ntp/weather
+        return lambda d, f: render.draw_boot(
+            d, W, H, args.label or BOOT_STAGES[min(f // 4, len(BOOT_STAGES) - 1)], f)
     if args.screen == "message":
         return lambda d, f: render.draw_message(d, W, H, args.message)
     raise SystemExit("unknown screen: %s" % args.screen)
@@ -169,13 +176,15 @@ def main():
                     help="play: animate in terminal; print: plain ASCII frames "
                          "to stdout (no escape codes)")
     ap.add_argument("--screen", default="weather",
-                    choices=["weather", "clock", "hilo", "co2", "message", "icons"])
+                    choices=["weather", "clock", "hilo", "co2", "boot", "message", "icons"])
     ap.add_argument("--code", type=int, default=61, help="WMO weather code (weather screen)")
     ap.add_argument("--temp", type=int, default=21, help="current temperature C")
     ap.add_argument("--night", action="store_true", help="weather screen: night (moon)")
     ap.add_argument("--hi", type=int, default=25)
     ap.add_argument("--lo", type=int, default=18)
     ap.add_argument("--ppm", type=int, default=812, help="CO2 ppm (co2 screen)")
+    ap.add_argument("--label", default=None,
+                    help="fixed stage label (boot screen); default cycles boot/wifi/ntp/weather")
     ap.add_argument("--message", default="no weather")
     ap.add_argument("--frames", type=int, default=12)
     ap.add_argument("--delay", type=float, default=0.15, help="seconds per frame in play mode")

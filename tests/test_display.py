@@ -215,6 +215,42 @@ class TestCO2(unittest.TestCase):
                              % (ppm, lit, want))
 
 
+GOLDEN_BOOT_WIFI_F0 = (
+    '                                                     \n'
+    '                                                     \n'
+    '                                                     \n'
+    '          * * * ***  *** ***                         \n'
+    '   ***    * * *  *  *     *                          \n'
+    '   **@    * * *  *  *     *                          \n'
+    '   ***    * * *  *  ****  *                          \n'
+    '          ** *  *** *    ***                         \n'
+    '                                                     \n'
+    '                                                     \n'
+    '                                                     '
+)
+
+
+class TestBoot(unittest.TestCase):
+    """Boot/loading screen: spinner + stage label, animated per frame."""
+
+    def test_boot_golden(self):
+        fb = frame(lambda d, f: render.draw_boot(d, W, H, "wifi", 0), 0)
+        self.assertEqual(ascii_of(fb), GOLDEN_BOOT_WIFI_F0)
+
+    def test_boot_spinner_animates(self):
+        a = frame(lambda d, f: render.draw_boot(d, W, H, "wifi", f), 0)
+        b = frame(lambda d, f: render.draw_boot(d, W, H, "wifi", f), 1)
+        self.assertNotEqual(ascii_of(a), ascii_of(b))
+
+    def test_boot_stages_cycle(self):
+        # the PR boot GIF walks the real stages: boot/wifi/ntp/weather
+        import sim as simmod
+        self.assertEqual(simmod.BOOT_STAGES, ("boot", "wifi", "ntp", "weather"))
+        a = frame(lambda d, f: render.draw_boot(d, W, H, simmod.BOOT_STAGES[0], 0), 0)
+        b = frame(lambda d, f: render.draw_boot(d, W, H, simmod.BOOT_STAGES[3], 0), 0)
+        self.assertNotEqual(ascii_of(a), ascii_of(b), "stage label has no effect")
+
+
 class TestTZ(unittest.TestCase):
     """src/tz.py: EU DST rule for Europe/* zones; UTC otherwise. Expected
     boundary epochs come from CPython's calendar (independent of tz.py)."""
@@ -335,6 +371,48 @@ class TestRunMainMocked(unittest.TestCase):
         # the mocked SCD41 must make the co2 screen appear in the rotation
         frames = run_main.run_screen_current("draw_co2", 25.0)
         self.assertTrue(frames, "co2 screen never appeared in the rotation")
+
+    def test_run_main_wrappers_preserve_signatures(self):
+        # before_after.render_icons detects day/night via inspect.signature;
+        # run_main's wrappers must not hide is_day (regression: after-side
+        # icons lost the moon when weather/rotation ran before icons)
+        import inspect
+        run_main.run_current(1.0)
+        self.assertIn("is_day", inspect.signature(render.draw_icon).parameters)
+        self.assertIn("is_day", inspect.signature(render.draw_weather).parameters)
+
+    def test_boot_animation_drawn_at_startup(self):
+        # with wifi+weather mocked OK, draw_boot is only used for the
+        # boot/loading stages — it must fire within the first seconds
+        frames = run_main.run_screen_current("draw_boot", 3.0)
+        self.assertTrue(frames, "no boot animation drawn at startup")
+        self.assertGreater(len(frames), 1, "boot animation is not animated")
+
+    def test_sys_values_logged_over_uart(self):
+        # read_sys() values must appear as a UART log line once per rotation
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run_main.run_current(22.0)  # one full rotation is 20s
+        out = buf.getvalue()
+        self.assertIn("sys: light=2048/4095", out)  # canned gu.light()
+        self.assertIn("temp=24.18C", out)            # canned ADC(4) = 14117
+        # VSYS is measured once at boot with the radio off (ADC(29) canned)
+        self.assertIn("sys: vsys=4.99V (radio off)", out)
+
+    def test_wifi_failure_does_not_kill_loop(self):
+        # wifi down: the loop must survive (show "no wifi"/"no weather")
+        # instead of raising out of main()
+        run_main.WIFI_OK = False
+        try:
+            # 26s: the 20s wifi timeout plus a few seconds of the main loop
+            frames = run_main.run_current(26.0)
+            msgs = run_main.run_screen_current("draw_message", 26.0)
+        finally:
+            run_main.WIFI_OK = True
+        self.assertGreater(len(frames), 30, "loop died after wifi failure")
+        self.assertTrue(msgs, "no status message shown after wifi failure")
 
     def test_scd41_altitude_configured(self):
         run_main.run_current(2.0)
