@@ -22,7 +22,7 @@ hi/lo screen.
 
 - Board attach (Windows host + WSL2, usbipd): `scripts/attach.sh` (once per
   boot on Windows: `usbipd bind --busid 2-2` as admin). Board shows up as
-  `/dev/ttyACM0`. If missing/unresponsive: `skills/board/SKILL.md`.
+  `/dev/ttyACM0`. If missing/unresponsive: `skills/mpremote/SKILL.md`.
 - Deploy: `scripts/deploy.sh` → `mpremote cp main.py :main.py`,
   `mpremote cp src/render.py :render.py`, `mpremote cp src/tz.py :tz.py`,
   `mpremote reset`. It fails fast with
