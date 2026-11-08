@@ -384,16 +384,33 @@ class TestRunMainMocked(unittest.TestCase):
         self.assertGreater(run_main.FakeChannel.beeps, 0, "no alarm beep")
 
     def test_co2_alarm_silent_in_the_dark(self):
-        run_main.CANNED_CO2 = 1500
-        run_main.CANNED_LIGHT = 0.0  # lights off
-        run_main.FakeChannel.beeps = 0
-        try:
-            run_main.run_current(22.0)
-        finally:
-            run_main.CANNED_CO2 = 812
-            run_main.CANNED_LIGHT = 2048.0
-        self.assertEqual(run_main.FakeChannel.beeps, 0,
-                         "alarm beeped in a dark room")
+        # dark room established at ALS < 20 -> no alarm at 0 or 19
+        for light in (0.0, 19.0):
+            run_main.CANNED_CO2 = 1500
+            run_main.CANNED_LIGHT = light
+            run_main.FakeChannel.beeps = 0
+            try:
+                run_main.run_current(22.0)
+            finally:
+                run_main.CANNED_CO2 = 812
+                run_main.CANNED_LIGHT = 2048.0
+            self.assertEqual(run_main.FakeChannel.beeps, 0,
+                             "alarm beeped at ALS=%s (dark)" % light)
+
+    def test_co2_alarm_threshold_boundary(self):
+        # ALS = 20 (ALS_ALARM_MIN) must beep, 19 must not
+        for light, want_beeps in ((20.0, True), (19.0, False)):
+            run_main.CANNED_CO2 = 1500
+            run_main.CANNED_LIGHT = light
+            run_main.FakeChannel.beeps = 0
+            try:
+                run_main.run_current(22.0)
+            finally:
+                run_main.CANNED_CO2 = 812
+                run_main.CANNED_LIGHT = 2048.0
+            self.assertEqual(run_main.FakeChannel.beeps > 0, want_beeps,
+                             "ALS=%s beeps=%s want %s"
+                             % (light, run_main.FakeChannel.beeps, want_beeps))
 
     def test_co2_alarm_silent_when_low(self):
         run_main.CANNED_CO2 = 800
