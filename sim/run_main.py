@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Run the actual main.py fully mocked and capture what the matrix would show.
 
-Mocks sit at the hardware/internet/time boundary — galactic, picographics,
+Mocks sit at the hardware/internet/time boundary — galactic (incl. gu.light()),
+picographics, machine.ADC,
 network, ntptime, urequests, ujson, secrets, time, and the Pimoroni sensor
 modules (pimoroni_i2c, breakout_scd41, frozen into the board firmware) —
 which is stable, so the
@@ -19,6 +20,7 @@ The canned weather below is a fixed sample — the real secrets.py (location,
 WiFi) is never read.
 """
 import argparse
+import functools
 import json
 import os
 import subprocess
@@ -43,6 +45,7 @@ CANNED_WX = {
 }
 CANNED_CO2 = 812  # ppm reported by the mocked SCD41
 SYNCED_EPOCH = 1793972928.0  # pretend NTP fixed the RTC to this
+WIFI_OK = True  # tests can set False to simulate a failed wifi connect
 
 
 class FakePimoroniI2C:
@@ -75,7 +78,9 @@ class FakeSCD41:
         return CANNED_CO2, 21.5, 45.0
 
 
-class _Stop(Exception):
+class _Stop(BaseException):
+    # BaseException so the app's own `except Exception` (resilient loop)
+    # doesn't swallow the harness stop signal
     pass
 
 
@@ -114,6 +119,10 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
 
     fake_time.sleep = _sleep
 
+    # boot is its own animation (exported via the 'boot' screen), not part of
+    # the rotation: don't record frames while a draw_boot call is in progress
+    booting = {"on": False}
+
     class FakeGu:
         WIDTH, HEIGHT = W, H
 
@@ -121,10 +130,28 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
             self.frames = []
 
         def update(self, d):
-            self.frames.append([row[:] for row in d.fb])
+            if not booting["on"]:
+                self.frames.append([row[:] for row in d.fb])
 
         def clear(self):
             pass
+
+        def light(self):
+            return 2048.0  # canned: 50% of the 0..4095 range (float, like the board)
+
+    machine = types.ModuleType("machine")
+
+    class FakeADC:
+        # canned read_u16: ch4 -> ~24.3 C die temp, ch29 (VSYS/3) -> ~5.0 V
+        READINGS = {4: 14117, 29: 33008}
+
+        def __init__(self, ch):
+            self.ch = ch
+
+        def read_u16(self):
+            return FakeADC.READINGS.get(self.ch, 0)
+
+    machine.ADC = FakeADC
 
     galactic = types.ModuleType("galactic")
     galactic.GalacticUnicorn = FakeGu
@@ -140,7 +167,7 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
             pass
 
         def isconnected(self):
-            return True
+            return WIFI_OK
 
         def ifconfig(self):
             return ("192.168.1.42", "255.255.255.0", "192.168.1.1", "1.1.1.1")
@@ -150,7 +177,10 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     network.WLAN = lambda iface: FakeWLAN()
 
     ntptime = types.ModuleType("ntptime")
-    ntptime.settime = mock.Mock(side_effect=lambda: state.update(t=SYNCED_EPOCH))
+    # the RTC jump must not count against the virtual run budget — reset the
+    # clock reference so _Stop measures from after the sync
+    ntptime.settime = mock.Mock(
+        side_effect=lambda: state.update(t=SYNCED_EPOCH, start=None))
 
     class FakeResp:
         status_code = 200
@@ -176,19 +206,32 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     stubs = {"time": fake_time, "galactic": galactic,
              "picographics": picographics, "secrets": secrets,
              "network": network, "ntptime": ntptime,
-             "urequests": urequests, "ujson": ujson,
+             "urequests": urequests, "ujson": ujson, "machine": machine,
              "pimoroni_i2c": pimoroni_i2c, "breakout_scd41": breakout_scd41}
     rmod = _render
     if render_src is not None:
         rmod = types.ModuleType("render_at_ref")
         exec(compile(render_src, "render.py@ref", "exec"), rmod.__dict__)
         stubs["render"] = rmod
+    # mark the boot phase: wrap every draw_* so FakeGu.update can skip those
+    # frames (tolerant of refs whose render.py has no draw_boot)
+    for name in [n for n in vars(rmod) if n.startswith("draw_")]:
+        fn = getattr(rmod, name)
+
+        def make(n, f):
+            @functools.wraps(f)  # keep signature: render_icons detects is_day via inspect
+            def wrapped(d, *a, **k):
+                booting["on"] = (n == "draw_boot")
+                return f(d, *a, **k)
+            return wrapped
+        setattr(rmod, name, make(name, fn))
     orig = None
     if capture_func is not None:
         orig = getattr(rmod, capture_func, None)
         if orig is not None:
-            def wrapper(d, *a, _orig=orig):
-                _orig(d, *a)
+            @functools.wraps(orig)
+            def wrapper(d, *a, _orig=orig, **k):
+                _orig(d, *a, **k)
                 capture_out.append([row[:] for row in d.fb])
             setattr(rmod, capture_func, wrapper)
 
@@ -204,9 +247,10 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     finally:
         if orig is not None:
             setattr(rmod, capture_func, orig)
-    # the app really did go through the mocked internet + RTC sync
+    # the app really did go through the mocked internet (+ RTC sync if wifi ok)
     assert urequests.get.called, "main.py never fetched weather"
-    assert ntptime.settime.called, "main.py never synced the RTC"
+    if WIFI_OK:
+        assert ntptime.settime.called, "main.py never synced the RTC"
     assert "api.open-meteo.com" in urequests.get.call_args[0][0]
     return g["gu"].frames
 
