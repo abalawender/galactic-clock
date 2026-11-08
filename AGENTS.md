@@ -27,7 +27,7 @@ hi/lo screen.
   `mpremote cp src/render.py :render.py`, `mpremote cp src/tz.py :tz.py`,
   `mpremote reset`. It fails fast with
   the attach hint if the board is not usbipd-attached (`/dev/ttyACM0` missing).
-  File management: `skills/board-files/SKILL.md`. One-off display snippets:
+  File management: `skills/mpremote/SKILL.md`. One-off display snippets:
   `skills/display/`.
 - **Preview display changes in sim/ before deploying** — not as a fallback for
   a detached board, but because you can actually see what the matrix will

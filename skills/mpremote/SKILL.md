@@ -1,6 +1,6 @@
 ---
 name: mpremote
-description: Working with the board over mpremote/REPL — attach/recovery (usbipd) plus the rule that mpremote exec interrupts the running main.py. Read before any mpremote exec.
+description: Working with the board over mpremote/REPL — attach/recovery (usbipd), flash file management, and the rule that mpremote exec interrupts the running main.py. Read before any mpremote exec.
 ---
 
 # mpremote / REPL on the Galactic Unicorn (Pico W)
@@ -41,3 +41,33 @@ below:
 4. Verify: `mpremote exec "print('ok')"` (halts main.py — see above)
 5. REPL still silent -> `mpremote exec "import machine; machine.reset()"`,
    wait ~5 s, re-attach if the port vanished, verify again
+
+## Files on the flash
+
+Prerequisite: board attached to WSL2 (see above). Use `mpremote`:
+
+- list:      `mpremote ls :/`
+- run code:  `mpremote exec "print(1+1)"` (halts main.py — see above)
+- run file:  `mpremote run local.py`
+- upload:    `mpremote cp local.py :main.py`
+- download:  `mpremote cp :main.py local.py`
+- reboot:    `mpremote reset`  (reboots into `/main.py`)
+
+Files on the flash: `/main.py` (autostart), `/render.py`, `/tz.py` — exactly
+what `scripts/deploy.sh` uploads. `/secrets.py` holds WiFi credentials and
+location: gitignored, and it must stay on the board only — never read, print,
+or `mpremote cp :secrets.py ...` it (see AGENTS.md golden rules). To *create*
+it, copy the committed template `secrets.example.py`, fill in real values, and
+upload host -> board only (`mpremote cp secrets.py :secrets.py`), then delete
+the local file; the variable contract is documented in README "Board
+configuration".
+The rest of the "default" Python (`galactic`, `picographics`,
+`breakout_scd41`, ...) is frozen into the firmware image (visible via
+`help('modules')` on the board), not files. Board firmware APIs: see
+`skills/unicorn`.
+
+## Boot semantics
+
+- `/boot.py` runs at every power-on/reset before anything else (not used).
+- `/main.py` runs at boot right after boot.py — the autostart entry point.
+  No main.py present -> plain REPL at boot.
