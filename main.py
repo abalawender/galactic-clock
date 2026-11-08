@@ -179,7 +179,7 @@ def show_co2(ppm, seconds):
 
 
 CO2_ALARM_PPM = 1200   # SCD41 CO2 accuracy ±(40 ppm + 5%) — threshold is soft
-ALS_ALARM_MIN = 10     # gu.light() raw 0..4095; office lights read 20-40
+ALS_ALARM_MIN = 20     # gu.light() raw 0..4095; dark room established < 20, office lights 20-40
 
 alarm_ch = None
 
