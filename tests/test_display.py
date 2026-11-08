@@ -156,11 +156,11 @@ GOLDEN_CO2 = (
     '                                                     \n'
     '                                                     \n'
     '                                                     \n'
-    '           ***  **** ***       **** ** ***           \n'
-    '          *    *   *    *     *   *  *    *          \n'
-    '          *    *   *  **       ***   *  **           \n'
-    '          *    *   * *        *   *  * *             \n'
-    '           ***  ***  ****      ***   * ****          \n'
+    ' **** ** ***      ***  ***   ***     *  *  **** *   *\n'
+    '*   *  *    *        *    * *        *  *  *       * \n'
+    ' ***   *  **       **   **  *        *  *  ***    *  \n'
+    '*   *  * *        *    *    *         ****    *  *   \n'
+    ' ***   * ****     **** ****  ***        *  ***  *   *\n'
     '                                                     \n'
     '                                                     \n'
     '                                                     '
@@ -194,7 +194,7 @@ class TestGolden(unittest.TestCase):
         self.assertEqual(ascii_of(fb), GOLDEN_CLOCK)
 
     def test_co2(self):
-        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812))
+        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812, 21.5, 45.0))
         self.assertEqual(ascii_of(fb), GOLDEN_CO2)
 
 
@@ -202,14 +202,14 @@ class TestCO2(unittest.TestCase):
     """SCD41 CO2 screen: centered, color encodes indoor air quality."""
 
     def test_co2_centered(self):
-        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812))
+        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812, 21.5, 45.0))
         lo, hi = margins(fb)
         self.assertEqual(lo, hi, "co2 off-center: %s" % ((lo, hi),))
 
     def test_co2_color_buckets(self):
         for ppm, want in ((700, render.CO2_OK), (900, render.CO2_WARN),
                           (1300, render.CO2_BAD)):
-            fb = frame(lambda d, f: render.draw_co2(d, W, H, ppm))
+            fb = frame(lambda d, f: render.draw_co2(d, W, H, ppm, 21.5, 45.0))
             lit = {p for row in fb for p in row if p != (0, 0, 0)}
             self.assertEqual(lit, {want}, "ppm %d -> %s, want %s"
                              % (ppm, lit, want))
@@ -371,6 +371,40 @@ class TestRunMainMocked(unittest.TestCase):
         # the mocked SCD41 must make the co2 screen appear in the rotation
         frames = run_main.run_screen_current("draw_co2", 25.0)
         self.assertTrue(frames, "co2 screen never appeared in the rotation")
+
+    def test_co2_alarm_beeps_when_high_and_lit(self):
+        run_main.CANNED_CO2 = 1500
+        run_main.CANNED_LIGHT = 100.0
+        run_main.FakeChannel.beeps = 0
+        try:
+            run_main.run_current(22.0)
+        finally:
+            run_main.CANNED_CO2 = 812
+            run_main.CANNED_LIGHT = 2048.0
+        self.assertGreater(run_main.FakeChannel.beeps, 0, "no alarm beep")
+
+    def test_co2_alarm_silent_in_the_dark(self):
+        run_main.CANNED_CO2 = 1500
+        run_main.CANNED_LIGHT = 0.0  # lights off
+        run_main.FakeChannel.beeps = 0
+        try:
+            run_main.run_current(22.0)
+        finally:
+            run_main.CANNED_CO2 = 812
+            run_main.CANNED_LIGHT = 2048.0
+        self.assertEqual(run_main.FakeChannel.beeps, 0,
+                         "alarm beeped in a dark room")
+
+    def test_co2_alarm_silent_when_low(self):
+        run_main.CANNED_CO2 = 800
+        run_main.CANNED_LIGHT = 100.0
+        run_main.FakeChannel.beeps = 0
+        try:
+            run_main.run_current(22.0)
+        finally:
+            run_main.CANNED_CO2 = 812
+            run_main.CANNED_LIGHT = 2048.0
+        self.assertEqual(run_main.FakeChannel.beeps, 0)
 
     def test_run_main_wrappers_preserve_signatures(self):
         # before_after.render_icons detects day/night via inspect.signature;
