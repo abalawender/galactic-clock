@@ -37,6 +37,12 @@ hi/lo screen.
   `python3 sim/sim.py play ...` animates in the terminal. Render the whole
   rotation loop (real `main.py`, fully mocked) to a GIF for reviews:
   `python3 sim/run_main.py --seconds 18 --gif /tmp/rotation.gif` (needs Pillow).
+  In agent sandboxes the ambient `LD_LIBRARY_PATH` can point at an incompatible
+  libstdc++ (e.g. the editor's), which breaks Pillow's libLerc with
+  `GLIBCXX_3.4.29 not found`; run with a clean env instead:
+  `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/local/bin python3 ...` — same for
+  `python3 -m unittest discover -s tests` so the Pillow-dependent GIF test
+  actually runs instead of skipping.
 - **Run the tests with any display change**:
   `python3 -m unittest discover -s tests -v` — bitmap property checks, golden
   ASCII dumps, tz DST rules, and a mocked full run of `main.py`.

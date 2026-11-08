@@ -48,9 +48,9 @@ variable is documented inline there (WiFi, location, `TZ`, optional
 `SCD41_ALTITUDE_M`) — and fill in real values:
 
 ```
-cp secrets.example.py secrets.py    # fill in real values
+cp secrets.example.py secrets.py     # fill in real values
 mpremote cp secrets.py :secrets.py   # host -> board only
-rm secrets.py                       # board holds the only copy
+rm secrets.py                        # board holds the only copy
 ```
 
 ## Board API
