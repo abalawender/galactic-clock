@@ -151,8 +151,9 @@ python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
   `before_after.py` (PR review GIFs), `gif.py` (Pillow writer)
 - `tests/` — unittest suite (bitmaps, golden ASCII, tz rules, mocked main loop)
 - `scripts/` — attach.sh, deploy.sh (uploads `main.py` + `render.py` + `tz.py`, resets board)
-- `skills/` — agent skills: board attach/recovery (`board`), flash file
-  management (`board-files`), on-device display snippets (`display`)
+- `skills/` — agent skills: board attach/recovery, REPL rules and flash file
+  management (`mpremote`), Galactic Unicorn firmware APIs (`unicorn`),
+  on-device display snippets (`display`)
 - `docs/` — flashing notes, hardware resource inventory (`hardware.md`) + the tracked README demo GIF; `firmware/` — local uf2 copy (gitignored)
 
 ## License & contributing
