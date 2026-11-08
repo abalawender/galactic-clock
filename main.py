@@ -169,13 +169,35 @@ def show_hilo(wx, seconds):
         time.sleep(0.2)
 
 
-def show_co2(ppm, seconds):
+def show_co2(ppm, temp_c, rh, seconds):
     end = time.time() + seconds
     while time.time() < end:
         render.clear(d, W, H)
-        render.draw_co2(d, W, H, ppm)
+        render.draw_co2(d, W, H, ppm, temp_c, rh)
         gu.update(d)
         time.sleep(0.2)
+
+
+CO2_ALARM_PPM = 1200   # SCD41 CO2 accuracy ±(40 ppm + 5%) — threshold is soft
+ALS_ALARM_MIN = 10     # gu.light() raw 0..4095; office lights read 20-40
+
+alarm_ch = None
+
+
+def co2_alarm(ppm):
+    """Audible alarm for high CO2, but only when the room has light (i.e.
+    someone is around to hear it). Beeps once per call via the synth."""
+    global alarm_ch
+    if ppm < CO2_ALARM_PPM or gu.light() < ALS_ALARM_MIN:
+        return
+    if alarm_ch is None:
+        alarm_ch = gu.synth_channel(0)
+    alarm_ch.configure(waveforms=2, frequency=880, volume=100,
+                       attack=0.01, decay=0.05, sustain=0.5, release=0.1)
+    alarm_ch.trigger_attack()
+    time.sleep(0.3)
+    alarm_ch.trigger_release()
+    print("CO2 ALARM: %d ppm, light %d" % (ppm, gu.light()))
 
 
 def read_sys():
@@ -250,8 +272,9 @@ def main():
             else:
                 show_text("no weather", 5)
             if sensor is not None and sensor.ready():
-                co2, _temp, _rh = sensor.measure()
-                show_co2(co2, 5)
+                co2, temp_c, rh = sensor.measure()
+                show_co2(co2, temp_c, rh, 5)
+                co2_alarm(co2)
             log_sys()
         except Exception as e:
             print("loop error:", e)

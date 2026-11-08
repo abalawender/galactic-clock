@@ -43,7 +43,8 @@ CANNED_WX = {
     "current": {"temperature_2m": 21.3, "weather_code": 61},
     "daily": {"temperature_2m_max": [25.4], "temperature_2m_min": [17.6]},
 }
-CANNED_CO2 = 812  # ppm reported by the mocked SCD41
+CANNED_CO2 = 812  # ppm reported by the mocked SCD41 (tests override)
+CANNED_LIGHT = 2048.0  # gu.light() raw 0..4095 (tests override)
 SYNCED_EPOCH = 1793972928.0  # pretend NTP fixed the RTC to this
 WIFI_OK = True  # tests can set False to simulate a failed wifi connect
 
@@ -57,8 +58,8 @@ class FakePimoroniI2C:
 
 
 class FakeSCD41:
-    """Canned SCD41: 812 ppm, 21.5 C, 45 %RH, always ready. Last instance is
-    kept on the class so tests can introspect what main.py configured."""
+    """Canned SCD41: CANNED_CO2 ppm, 21.5 C, 45 %RH, always ready. Last instance
+    is kept on the class so tests can introspect what main.py configured."""
     last = None
 
     def __init__(self, i2c, address=0x62):
@@ -82,6 +83,20 @@ class _Stop(BaseException):
     # BaseException so the app's own `except Exception` (resilient loop)
     # doesn't swallow the harness stop signal
     pass
+
+
+class FakeChannel:
+    """Records alarm beeps so tests can assert on them."""
+    beeps = 0
+
+    def configure(self, **kw):
+        pass
+
+    def trigger_attack(self):
+        FakeChannel.beeps += 1
+
+    def trigger_release(self):
+        pass
 
 
 def _git_show(ref, path):
@@ -137,7 +152,13 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
             pass
 
         def light(self):
-            return 2048.0  # canned: 50% of the 0..4095 range (float, like the board)
+            return CANNED_LIGHT  # raw 0..4095 float, like the board
+
+        def synth_channel(self, ch):
+            return FakeChannel()
+
+        def stop_playing(self):
+            pass
 
     machine = types.ModuleType("machine")
 
