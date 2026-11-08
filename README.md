@@ -153,7 +153,7 @@ python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
 - `scripts/` — attach.sh, deploy.sh (uploads `main.py` + `render.py` + `tz.py`, resets board)
 - `skills/` — agent skills: board attach/recovery (`board`), flash file
   management (`board-files`), on-device display snippets (`display`)
-- `docs/` — flashing notes + the tracked README demo GIF; `firmware/` — local uf2 copy (gitignored)
+- `docs/` — flashing notes, hardware resource inventory (`hardware.md`) + the tracked README demo GIF; `firmware/` — local uf2 copy (gitignored)
 
 ## License & contributing
 
