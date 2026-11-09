@@ -56,6 +56,24 @@ CANNED_CO2 = 812  # ppm reported by the mocked SCD41 (tests override)
 CANNED_LIGHT = 2048.0  # gu.light() raw 0..4095 (tests override)
 SYNCED_EPOCH = 1793972928.0  # pretend NTP fixed the RTC to this
 WIFI_OK = True  # tests can set False to simulate a failed wifi connect
+# SPOTIFY_ON gates the mocked secrets: when False the secrets stub has no
+# SPOTIFY_* names, so main.py's SPOTIFY_ENABLED import fails (spotify off,
+# the rotation stays 20s, and the rotation tests keep their 22s budget).
+# Spotify-path tests set it True and restore it afterwards.
+SPOTIFY_ON = True  # default on: the rotation exercises the spotify screen
+CANNED_SPOTIFY = {  # /currently-playing 200 body = playback object (tests override)
+    "is_playing": True,
+    "progress_ms": 131250,
+    "item": {  # name/artists live under item, not the top level
+        "name": "Bohemian Rhapsody",
+        "artists": [{"name": "Queen"}],
+        "duration_ms": 355000,  # 37%, top-level
+    },
+}
+CANNED_SPOTIFY_TOKEN = "canned-access-token"  # /api/token access_token
+# now-playing GET status the mock returns (tests override: 401 -> expired token,
+# 204 -> nothing playing, 500 -> server error, 599 -> network blip).
+CANNED_SPOTIFY_STATUS = 200
 
 
 class FakePimoroniI2C:
@@ -117,7 +135,7 @@ def _git_show(ref, path):
 
 
 def run_main_src(src, seconds, render_src=None, capture_func=None,
-                 capture_out=None):
+                 capture_out=None, call_func=None, call_args=None):
     """Exec one main.py source with all externals mocked; return frame list.
 
     If capture_func is given (e.g. "draw_weather"), every call of that
@@ -218,17 +236,33 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
         side_effect=lambda: state.update(t=SYNCED_EPOCH, start=None))
 
     class FakeResp:
-        def __init__(self, status_code, payload):
+        def __init__(self, status_code, content):
             self.status_code = status_code
-            self.content = json.dumps(payload).encode()
+            self.content = content
 
-    def _fake_get(url, headers=None):
-        if "api.spotify.com" in url:
-            return FakeResp(200, CANNED_SPOTIFY)
-        return FakeResp(200, CANNED_WX)
+    # now-playing GETs are stateful per run: the first hit returns
+    # CANNED_SPOTIFY_STATUS, later hits return 200 — models "first fetch meets
+    # an expired token (401), re-mint, retry succeeds".
+    now_hits = {"n": 0}
+
+    def _resp_for(url, headers=None, data=None):
+        if "accounts.spotify.com" in url:   # token mint (POST)
+            return FakeResp(200, json.dumps(
+                {"access_token": CANNED_SPOTIFY_TOKEN}).encode())
+        if "api.spotify.com" in url:        # now-playing (GET)
+            if CANNED_SPOTIFY_STATUS == 599:  # simulated network blip
+                raise OSError("connection reset by peer")
+            status = (CANNED_SPOTIFY_STATUS if now_hits["n"] == 0 else 200)
+            now_hits["n"] += 1
+            return FakeResp(status, json.dumps(CANNED_SPOTIFY).encode())
+        return FakeResp(200, json.dumps(CANNED_WX).encode())  # open-meteo
 
     urequests = types.ModuleType("urequests")
-    urequests.get = mock.Mock(side_effect=_fake_get)
+    urequests.get = mock.Mock(
+        side_effect=lambda url, **kw: _resp_for(url, kw.get("headers")))
+    urequests.post = mock.Mock(
+        side_effect=lambda url, **kw: _resp_for(url, kw.get("headers"),
+                                                kw.get("data")))
     ujson = types.ModuleType("ujson")
     ujson.loads = json.loads
     ujson.dumps = json.dumps
@@ -239,6 +273,9 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     secrets.SCD41_ALTITUDE_M = 470  # canned, like the other secrets
     secrets.SPOTIFY_TOKEN = "mock-token"  # enables the spotify screen
     secrets.TZ = "Europe/Warsaw"  # canned timezone, exercises tz.utc_offset
+    if SPOTIFY_ON:
+        for k in ("SPOTIFY_CLIENT_ID", "SPOTIFY_REFRESH_TOKEN"):
+            setattr(secrets, k, "mock")
 
     pimoroni_i2c = types.ModuleType("pimoroni_i2c")
     pimoroni_i2c.PimoroniI2C = FakePimoroniI2C
@@ -279,24 +316,37 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
 
     # patch.dict swaps the stub modules in and restores them atomically,
     # even if the app code raises
+    result = None
     try:
         with mock.patch.dict(sys.modules, stubs):
-            g = {"__name__": "__main__"}
+            # in call-func mode use a non-"__main__" name so main.py's
+            # if-__name__==__main__ rotation loop never runs — the module is
+            # exec'd (setup + defs) and exactly one function is invoked
+            g = {"__name__": "main" if call_func is not None else "__main__"}
             try:
                 exec(compile(src, "main.py", "exec"), g)
             except _Stop:
                 pass
+            if call_func is not None:
+                # g is the exec globals dict — main.py top-level functions are
+                # its keys (fetch_spotify, refresh_spotify_token, ...); index,
+                # don't getattr (a dict has no such attributes)
+                result = g[call_func](
+                    *([] if call_args is None else call_args))
     finally:
         if orig is not None:
             setattr(rmod, capture_func, orig)
-    # the app really did go through the mocked internet (+ RTC sync if wifi ok)
+    if call_func is not None:
+        return result
+    # the app really did go through the mocked internet (+ RTC sync if wifi ok).
+    # scan the whole GET log (not just the last call — Spotify's now-playing
+    # GET lands after the weather one): at least one call must be open-meteo
     assert urequests.get.called, "main.py never fetched weather"
     if WIFI_OK:
         assert ntptime.settime.called, "main.py never synced the RTC"
-    # the last GET may be spotify (polled after the weather), so scan all calls
-    assert any("api.open-meteo.com" in c[0][0]
+    assert any("api.open-meteo.com" in (c.args[0] if c.args else "")
                for c in urequests.get.call_args_list), \
-        "main.py never fetched weather"
+        "no open-meteo fetch in the GET log"
     return g["gu"].frames
 
 
@@ -336,6 +386,23 @@ def run_screen_current(func, seconds):
     out = []
     run_main_src(src, seconds, capture_func=func, capture_out=out)
     return out or None
+
+
+def run_func_at(ref, func, call_args=None, render_src=None):
+    """Return the value of ref's main.py <func> called with mocks, isolated
+    from the display loop (module exec'd, rotation loop never runs)."""
+    src = _git_show(ref, "main.py")
+    if src is None:
+        return None
+    return run_main_src(src, 0.0, render_src=render_src, call_func=func,
+                        call_args=call_args)
+
+
+def run_func_current(func, call_args=None):
+    """Same as run_func_at but for the working tree."""
+    with open(os.path.join(REPO, "main.py")) as fh:
+        src = fh.read()
+    return run_main_src(src, 0.0, call_func=func, call_args=call_args)
 
 
 def main():

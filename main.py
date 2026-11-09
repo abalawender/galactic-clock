@@ -35,9 +35,10 @@ except ImportError:
     SCD41_ALTITUDE_M = 0
 
 try:
-    from secrets import SPOTIFY_TOKEN  # optional; absent = no spotify screen
+    from secrets import SPOTIFY_CLIENT_ID, SPOTIFY_REFRESH_TOKEN
+    SPOTIFY_ENABLED = True
 except ImportError:
-    SPOTIFY_TOKEN = None
+    SPOTIFY_ENABLED = False
 
 import render
 import tz
@@ -45,6 +46,8 @@ import tz
 WX_URL = "https://api.open-meteo.com/v1/forecast"
 SPOTIFY_URL = "https://api.spotify.com/v1/me/player/currently-playing"
 REFRESH_S = 600
+SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
+SPOTIFY_NOW_URL = "https://api.spotify.com/v1/me/player/currently-playing"
 
 # SCD41 on the STEMMA QT / Qwiic connector
 I2C_SDA_PIN = 4
@@ -189,6 +192,55 @@ def show_co2(ppm, seconds, alarm=False):
         time.sleep(0.2)
 
 
+spotify_access = None
+
+
+def refresh_spotify_token():
+    global spotify_access
+    data = ("grant_type=refresh_token&refresh_token=%s&client_id=%s"
+            % (SPOTIFY_REFRESH_TOKEN, SPOTIFY_CLIENT_ID))
+    r = urequests.post(SPOTIFY_TOKEN_URL, data=data,
+                       headers={"Content-Type": "application/x-www-form-urlencoded"})
+    if r.status_code != 200:
+        raise RuntimeError("spotify token http %d" % r.status_code)
+    spotify_access = ujson.loads(r.content)["access_token"]
+    return spotify_access
+
+
+def fetch_spotify():
+    """Currently-playing track from the Spotify Web API, polled once per
+    rotation. None when no token is configured, nothing is playing (204), or
+    the request fails (e.g. 401 on an expired token) — the screen is then
+    simply skipped. A bearer token with scope user-read-currently-playing
+    is needed; tokens live 1 h, so for this prototype a fresh one is pasted
+    into secrets.py (see secrets.example.py)."""
+    if spotify_access is None:
+        refresh_spotify_token()
+    headers = {"Authorization": "Bearer %s" % spotify_access}
+    r = urequests.get(SPOTIFY_NOW_URL, headers=headers)
+    if r.status_code == 401:
+        refresh_spotify_token()
+        headers = {"Authorization": "Bearer %s" % spotify_access}
+        r = urequests.get(SPOTIFY_NOW_URL, headers=headers)
+    if r.status_code == 204:
+        return None
+    if r.status_code != 200:
+        raise RuntimeError("spotify now http %d" % r.status_code)
+    j = ujson.loads(r.content)
+    item = j.get("item") or {}
+    name = item.get("name")
+    if not name:
+        return None
+    artist = ""
+    arts = item.get("artists") or []
+    if arts:
+        artist = arts[0]["name"]
+    progress = 0
+    if j.get("progress_ms") is not None and item.get("duration_ms") is not None:
+        progress = j["progress_ms"] * 100 // item["duration_ms"]
+    return name, artist, progress
+
+
 # the audible alarm fires at render.CO2_RED_PPM — the same level that turns
 # the CO2 font red. SCD41 accuracy is ±(40 ppm + 5%), so the threshold is soft.
 ALS_ALARM_MIN = 20     # gu.light() raw 0..4095; dark room established < 20, office lights 20-40
@@ -224,40 +276,6 @@ def co2_alarm(ppm):
         time.sleep(0.12)
     gu.stop_playing()
     print("CO2 ALARM: %d ppm, light %d" % (ppm, gu.light()))
-
-
-def fetch_spotify():
-    """Currently-playing track from the Spotify Web API, polled once per
-    rotation. None when no token is configured, nothing is playing (204), or
-    the request fails (e.g. 401 on an expired token) — the screen is then
-    simply skipped. A bearer token with scope user-read-currently-playing
-    is needed; tokens live 1 h, so for this prototype a fresh one is pasted
-    into secrets.py (see secrets.example.py)."""
-    if not SPOTIFY_TOKEN:
-        return None
-    try:
-        r = urequests.get(SPOTIFY_URL,
-                          headers={"Authorization": "Bearer " + SPOTIFY_TOKEN})
-        if r.status_code == 204:
-            return None  # no active playback device
-        if r.status_code != 200:
-            raise RuntimeError("spotify http %d" % r.status_code)
-        j = ujson.loads(r.content)
-        item = j.get("item") or {}
-        artists = item.get("artists") or []
-        artist = artists[0].get("name", "?") if artists else "?"
-        dur = item.get("duration_ms") or 1
-        progress = j.get("progress_ms", 0) / dur
-        if progress < 0.0:
-            progress = 0.0
-        elif progress > 1.0:
-            progress = 1.0
-        return {"line": "%s - %s" % (artist, item.get("name", "?")),
-                "progress": progress,
-                "playing": bool(j.get("is_playing", True))}
-    except Exception as e:
-        print("spotify fetch failed:", e)
-        return None
 
 
 spotify_frame = 0  # persistent across rotations: the marquee resumes where it stopped
@@ -341,7 +359,6 @@ def main():
                 except Exception as e:
                     print("weather fetch failed:", e)
                     wx = None
-            sp = fetch_spotify()
             show_clock(5)
             if wx is not None:
                 show_weather(wx, 5)
@@ -353,9 +370,17 @@ def main():
                 # alarm fires inside show_co2 right after the first frame,
                 # so the beep overlaps the screen instead of preceding it
                 show_co2(co2, 5, alarm=True)
-            if sp is not None:
-                print("spotify: %s" % sp["line"])
-                show_spotify(sp, 5)
+            if SPOTIFY_ENABLED and wlan is not None:
+                try:
+                    track = fetch_spotify()
+                    if track is None:
+                        print("spotify: nothing playing")
+                    else:
+                        name, artist, progress = track
+                        print("spotify: %d%% %s - %s"
+                              % (progress, name, artist or "?"))
+                except Exception as e:
+                    print("spotify failed:", e)
             log_sys()
         except Exception as e:
             print("loop error:", e)

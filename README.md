@@ -62,6 +62,33 @@ mpremote cp secrets.py :secrets.py   # host -> board only
 rm secrets.py                        # board holds the only copy
 ```
 
+## Spotify now-playing (optional)
+
+Optional `secrets.py` values `SPOTIFY_CLIENT_ID` / `SPOTIFY_REFRESH_TOKEN` add
+a now-playing screen to the rotation (scrolling `artist  —  name`). Omit both to disable it (`SPOTIFY_ENABLED=False`). The board
+has no GUI to log in on, so the long-lived refresh token is minted **once, on
+a PC**; the board then mints its own 1h access token from it on every fetch.
+
+The Spotify public-client (PKCE) flow is used and the
+one-time browser login needs a PKCE verifier. The mint script generates it:
+
+1. [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) ->
+   *Create app*. Under *API Settings* add a redirect URI such as
+   `http://127.0.0.1:8888/callback` (it must be in the app's allowed list
+   exactly as registered).
+2. Mint the refresh token on the host — a local callback server catches the
+   browser redirect, does the PKCE exchange, and prints the result:
+
+   ```
+   python3 scripts/spotify_auth.py \
+       --client-id CLIENT_ID
+   ```
+
+   Log in to Spotify in the browser and approve; the script then prints
+   `SPOTIFY_REFRESH_TOKEN = "..."`.
+3. Put `SPOTIFY_CLIENT_ID` and `SPOTIFY_REFRESH_TOKEN` in `secrets.py` and
+   copy to the board as in the section above.
+
 ## Board API
 
 ```python
