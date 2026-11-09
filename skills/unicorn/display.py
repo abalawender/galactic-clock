@@ -10,6 +10,9 @@ Usage:
                                                        # labelled ("n" = night); loops until
                                                        # interrupted, then `mpremote reset`
                                                        # returns to the weather clock
+    python3 skills/display/display.py --spotify5       # HITL review: ~15 s of the two-line
+                                                       # 5px now-playing screen (deployed
+                                                       # render.py); then `mpremote reset`
     python3 skills/display/display.py --stop           # interrupt animation and clear
 
 The animation loop runs in the board's main REPL thread, so any later mpremote
@@ -106,6 +109,26 @@ while True:
     i += 1
 """
 
+# HITL two-line now-playing review: uses the deployed render.py, so this shows
+# exactly what the board draws. ~15 s of the 5px artist/title marquee with the
+# progress bar, then the snippet exits (mpremote reset returns to the clock).
+SPOTIFY5 = """from galactic import GalacticUnicorn
+from picographics import PicoGraphics, DISPLAY_GALACTIC_UNICORN
+import render
+import time
+gu = GalacticUnicorn()
+d = PicoGraphics(display=DISPLAY_GALACTIC_UNICORN)
+W, H = gu.WIDTH, gu.HEIGHT
+frame = 0
+for _ in range(150):  # ~15 s at 0.1 s per frame
+    render.clear(d, W, H)
+    render.draw_spotify5(d, W, H, "Daft Punk", "Around the World (Radio Edit)",
+                         frame, 0.37)
+    gu.update(d)
+    frame += 1
+    time.sleep(0.1)
+"""
+
 CLEAR = """from galactic import GalacticUnicorn
 GalacticUnicorn().clear()
 """
@@ -131,11 +154,17 @@ def main():
                     help="HITL review: cycle all weather icons on the board, "
                          "3 s each with the WMO code labelled; loops until "
                          "interrupted (then --stop / mpremote reset)")
+    ap.add_argument("--spotify5", action="store_true",
+                    help="HITL review: ~15 s of the two-line 5px now-playing screen "
+                         "(deployed render.py), then exits; mpremote reset returns "
+                         "to the weather clock")
     ap.add_argument("--stop", action="store_true", help="interrupt animation and clear")
     args = ap.parse_args()
 
     if args.stop:
         run(CLEAR)
+    elif args.spotify5:
+        run(SPOTIFY5, timeout=30)
     elif args.icons:
         # review loops forever on the board; the timeout only bounds the local
         # subprocess — interrupt with Ctrl-C / --stop when done reviewing
