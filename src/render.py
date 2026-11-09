@@ -407,6 +407,163 @@ def draw_spotify(d, w, h, line, frame, progress=0.0, playing=True):
     d.rectangle(0, h - 1, int(progress * w), 1)
 
 
+# --- 5px monospace font for two-line screens --------------------------------
+# Hand-authored 5x5 (Tiny5-style); same column-byte format as the sim's
+# font6_data: bit y of byte x = pixel (x, y), row 0 = top. Rendered with
+# d.pixel() so it also works on the board's PicoGraphics (no custom font).
+FONT5 = {
+    ' ': (0, 0, 0, 0, 0),
+    '!': (0, 0, 15, 0, 0),
+    '"': (0, 3, 0, 3, 0),
+    '#': (10, 31, 10, 31, 10),
+    '$': (4, 10, 31, 10, 18),
+    '%': (19, 8, 4, 2, 25),
+    '&': (14, 17, 21, 10, 16),
+    "'": (0, 0, 3, 0, 0),
+    '(': (0, 0, 14, 17, 0),
+    ')': (0, 17, 14, 0, 0),
+    '*': (0, 10, 4, 10, 0),
+    '+': (0, 4, 14, 4, 0),
+    ',': (0, 16, 8, 0, 0),
+    '-': (0, 4, 4, 4, 0),
+    '.': (0, 0, 16, 0, 0),
+    '/': (16, 8, 4, 2, 1),
+    '0': (14, 17, 25, 21, 14),
+    '1': (0, 18, 31, 16, 0),
+    '2': (18, 17, 25, 21, 18),
+    '3': (2, 17, 21, 29, 2),
+    '4': (8, 12, 10, 31, 8),
+    '5': (23, 21, 21, 21, 9),
+    '6': (14, 21, 21, 21, 8),
+    '7': (1, 1, 25, 5, 3),
+    '8': (10, 21, 21, 21, 10),
+    '9': (2, 21, 21, 21, 14),
+    ':': (0, 0, 10, 0, 0),
+    ';': (0, 16, 10, 0, 0),
+    '<': (0, 4, 10, 17, 0),
+    '=': (0, 10, 10, 10, 0),
+    '>': (0, 17, 10, 4, 0),
+    '?': (2, 1, 25, 5, 2),
+    '@': (14, 17, 21, 21, 6),
+    'A': (30, 5, 5, 5, 30),
+    'B': (31, 21, 21, 21, 10),
+    'C': (14, 17, 17, 17, 0),
+    'D': (31, 17, 17, 10, 4),
+    'E': (31, 21, 21, 21, 17),
+    'F': (31, 5, 5, 5, 1),
+    'G': (14, 17, 17, 21, 12),
+    'H': (31, 4, 4, 4, 31),
+    'I': (0, 17, 31, 17, 0),
+    'J': (8, 16, 17, 15, 1),
+    'K': (31, 4, 4, 10, 17),
+    'L': (31, 16, 16, 16, 16),
+    'M': (31, 2, 4, 2, 31),
+    'N': (31, 2, 4, 8, 31),
+    'O': (14, 17, 17, 17, 14),
+    'P': (31, 5, 5, 5, 2),
+    'Q': (14, 17, 17, 9, 22),
+    'R': (31, 5, 5, 13, 18),
+    'S': (18, 21, 21, 21, 9),
+    'T': (1, 1, 31, 1, 1),
+    'U': (15, 16, 16, 16, 15),
+    'V': (15, 0, 16, 0, 15),
+    'W': (31, 8, 4, 8, 31),
+    'X': (27, 0, 4, 0, 27),
+    'Y': (3, 0, 28, 0, 3),
+    'Z': (17, 25, 21, 19, 17),
+    '[': (0, 31, 17, 17, 0),
+    '\\': (1, 2, 4, 8, 16),
+    ']': (0, 17, 17, 31, 0),
+    '^': (0, 2, 1, 2, 0),
+    '_': (16, 16, 16, 16, 16),
+    '`': (0, 1, 2, 0, 0),
+    'a': (0, 20, 20, 20, 24),
+    'b': (31, 20, 20, 20, 8),
+    'c': (8, 20, 20, 20, 0),
+    'd': (8, 20, 20, 20, 31),
+    'e': (8, 28, 28, 28, 8),
+    'f': (0, 30, 5, 5, 0),
+    'g': (20, 10, 10, 10, 30),
+    'h': (31, 4, 4, 4, 24),
+    'i': (0, 20, 29, 16, 0),
+    'j': (0, 16, 20, 13, 0),
+    'k': (31, 8, 8, 20, 0),
+    'l': (0, 1, 31, 0, 0),
+    'm': (28, 4, 24, 4, 24),
+    'n': (28, 4, 4, 4, 24),
+    'o': (8, 20, 20, 20, 8),
+    'p': (30, 10, 10, 10, 4),
+    'q': (4, 10, 10, 10, 30),
+    'r': (28, 8, 4, 4, 0),
+    's': (24, 20, 20, 20, 4),
+    't': (0, 15, 20, 20, 0),
+    'u': (12, 16, 16, 16, 28),
+    'v': (12, 0, 16, 0, 12),
+    'w': (12, 16, 8, 16, 12),
+    'x': (20, 0, 8, 0, 20),
+    'y': (4, 8, 16, 8, 4),
+    'z': (20, 20, 28, 20, 20),
+    '{': (0, 4, 10, 17, 0),
+    '|': (0, 0, 31, 0, 0),
+    '}': (0, 17, 10, 4, 0),
+    '~': (8, 4, 12, 8, 4),
+}
+
+
+def measure_text5(s, spacing=1):
+    """Width of `s` in the 5px monospace font (every glyph 5 px + spacing)."""
+    if not s:
+        return 0
+    return len(s) * (5 + spacing) - spacing
+
+
+def text5(d, s, x, y, spacing=1):
+    cx = x
+    for ch in s:
+        cols = FONT5.get(ch)
+        if cols is not None:
+            for col in range(5):
+                bits = cols[col]
+                for row in range(5):
+                    if bits >> row & 1:
+                        d.pixel(cx + col, y + row)
+        cx += 5 + spacing
+
+
+def draw_marquee5(d, w, text, frame, x0, y, color=WHITE, hold=8, gap=6):
+    """draw_marquee with the 5px font at an arbitrary y (two-line screens)."""
+    tw = measure_text5(text)
+    d.set_pen(d.create_pen(*color))
+    if tw <= w - x0:
+        text5(d, text, x0 + (w - x0 - tw) // 2, y)
+        return
+    off = (frame - hold) % (tw + gap) if frame >= hold else 0
+    text5(d, text, x0 - off, y)
+
+
+F5_TEXT_X = 9        # same icon gutter as NOTE_TEXT_X
+F5_LINE_Y = (0, 5)   # two 5px lines fill rows 0..9; row 10 = progress bar
+
+
+def draw_spotify5(d, w, h, artist, title, frame, progress=0.0, playing=True):
+    """Two-line now-playing screen: artist (top) / title (bottom) marquee in
+    the 5px font, note icon left, 1 px progress bar on the bottom row. Lines
+    sit at rows 0-4 and 5-9, so a descender can touch the line below."""
+    color = WHITE if playing else PAUSED
+    draw_marquee5(d, w, artist, frame, F5_TEXT_X, F5_LINE_Y[0], color)
+    draw_marquee5(d, w, title, frame, F5_TEXT_X, F5_LINE_Y[1], color)
+    # mask the icon gutter so the marquee never bleeds into it, then the note
+    d.set_pen(d.create_pen(*BLACK))
+    d.rectangle(0, 0, F5_TEXT_X, h - 1)
+    d.set_pen(d.create_pen(*SPOTIFY))
+    for (x, y) in NOTE_PX:
+        d.pixel(x, 1 + y)
+    d.set_pen(d.create_pen(*SPOTIFY_DIM))
+    d.rectangle(0, h - 1, w, 1)
+    d.set_pen(d.create_pen(*SPOTIFY))
+    d.rectangle(0, h - 1, int(progress * w), 1)
+
+
 # 8 spinner positions around a center pixel
 SPIN = ((1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1))
 

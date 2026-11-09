@@ -23,7 +23,9 @@ Usage:
                                  # before/after/compare GIFs per screen, from a git ref
 
 Screens: weather (icon + temp), clock, hilo, co2, boot, message, spotify
-(note icon + scrolling --text marquee + --progress bar). --frames N renders
+(note icon + scrolling --text marquee + --progress bar), spotify5 (two-line
+5px font preview: --artist on top, --title below, note icon + progress bar),
+font5 (charset sheet of the 5px font, 16 chars per frame). --frames N renders
 N animation ticks (frame 0..N-1); --delay sets playback seconds per frame.
 """
 import argparse
@@ -115,6 +117,18 @@ def frame_to_text(fb):
     return "\n".join(lines)
 
 
+# --- 5px font preview screen (drawing code shared with the board) ----------
+
+def draw_font5_sheet(d, w, h, frame):
+    """Charset sheet of render's 5px font: 16 printable chars per frame,
+    8 per line, 2 lines."""
+    chars = [chr(o) for o in range(32, 127)]
+    chunk = chars[(frame * 16) % len(chars):(frame * 16) % len(chars) + 16]
+    d.set_pen(d.create_pen(*render.WHITE))
+    for i, line in enumerate((chunk[:8], chunk[8:])):
+        render.text5(d, "".join(line), 0, render.F5_LINE_Y[i])
+
+
 def make_screen_fn(args):
     if args.screen == "weather":
         return lambda d, f: render.draw_weather(d, W, H, args.code, "%dC" % args.temp, f,
@@ -134,6 +148,11 @@ def make_screen_fn(args):
     if args.screen == "spotify":
         return lambda d, f: render.draw_spotify(d, W, H, args.text, f,
                                                 args.progress, not args.paused)
+    if args.screen == "spotify5":
+        return lambda d, f: render.draw_spotify5(d, W, H, args.artist, args.title,
+                                                 f, args.progress, not args.paused)
+    if args.screen == "font5":
+        return lambda d, f: draw_font5_sheet(d, W, H, f)
     raise SystemExit("unknown screen: %s" % args.screen)
 
 
@@ -181,7 +200,7 @@ def main():
                          "to stdout (no escape codes)")
     ap.add_argument("--screen", default="weather",
                     choices=["weather", "clock", "hilo", "co2", "boot", "message",
-                             "spotify", "icons"])
+                             "spotify", "spotify5", "font5", "icons"])
     ap.add_argument("--code", type=int, default=61, help="WMO weather code (weather screen)")
     ap.add_argument("--temp", type=int, default=21, help="current temperature C")
     ap.add_argument("--night", action="store_true", help="weather screen: night (moon)")
@@ -197,6 +216,10 @@ def main():
                     help="track progress 0..1 (spotify screen)")
     ap.add_argument("--paused", action="store_true",
                     help="spotify screen: paused (dim marquee, no scroll)")
+    ap.add_argument("--artist", default="Daft Punk",
+                    help="top line (spotify5 screen)")
+    ap.add_argument("--title", default="Around the World",
+                    help="bottom line (spotify5 screen)")
     ap.add_argument("--frames", type=int, default=12)
     ap.add_argument("--delay", type=float, default=0.15, help="seconds per frame in play mode")
     ap.add_argument("--gif", default=None,
