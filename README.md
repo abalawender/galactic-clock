@@ -1,7 +1,7 @@
 # galactic-clock
 
 Pimoroni Galactic Unicorn (53x11 LED matrix) on a Raspberry Pi Pico W running
-MicroPython. A weather clock that rotates four screens on the matrix:
+MicroPython. A weather clock that rotates five screens on the matrix:
 
 - **clock** — local time, RTC synced via NTP (EU DST computed in pure integer
   math in `src/tz.py` — MicroPython has no tzdata), blinking colon
@@ -11,12 +11,19 @@ MicroPython. A weather clock that rotates four screens on the matrix:
 - **hi/lo** — today's high/low with up/down arrows
 - **CO2** — ppm from an optional SCD41 sensor on the STEMMA QT connector,
   color-coded green/amber/red by indoor air quality
+- **spotify** — now-playing "artist - title" as a scrolling marquee next to a
+  green note icon, with a track progress bar along the bottom (optional: only
+  shown when a Spotify Web API bearer token with the
+  `user-read-currently-playing` scope is set as `SPOTIFY_TOKEN` in
+  `secrets.py`; tokens expire after 1 h, so this is a manually refreshed
+  prototype for now)
 
 ![Display loop demo](docs/demo-rotation.gif)
 
-The full rotation (clock → animated weather → hi/lo → CO2), rendered by the
-host sim from the real `main.py` — regenerate with
-`python3 sim/run_main.py --seconds 18 --delay 0.12 --gif docs/demo-rotation.gif`
+The full rotation (clock → animated weather → hi/lo → CO2 → spotify), rendered
+by the host sim from the real `main.py` (spotify included via a canned mock
+response) — regenerate with
+`python3 sim/run_main.py --seconds 26 --delay 0.12 --gif docs/demo-rotation.gif`
 (needs Pillow; this one GIF is tracked, all other recordings stay uncommitted).
 
 ## Hardware & host setup
@@ -45,7 +52,9 @@ The board reads `/secrets.py` at boot. It is gitignored and lives only on the
 board flash — never commit it, never print it, never copy it back off the
 board. To create it, copy the committed template `secrets.example.py` — each
 variable is documented inline there (WiFi, location, `TZ`, optional
-`SCD41_ALTITUDE_M`) — and fill in real values:
+`SCD41_ALTITUDE_M`) — and fill in real values. An optional `SPOTIFY_TOKEN`
+(Spotify Web API bearer token, scope `user-read-currently-playing`) enables
+the now-playing screen; omit the line to skip it:
 
 ```
 cp secrets.example.py secrets.py     # fill in real values
@@ -80,6 +89,9 @@ python3 sim/sim.py play   --screen weather --code 61 --temp 21   # animate in te
 python3 sim/sim.py play   --screen weather --code 0 --night      # moon + stars
 python3 sim/sim.py play   --screen icons --frames 8              # contact sheet: all icons
 python3 sim/sim.py play   --screen hilo --hi 25 --lo 18
+python3 sim/sim.py print  --screen spotify --text "Radiohead - Creep" --frames 24
+                              # now-playing marquee: note icon + scrolling
+                              # "artist - title" + progress bar (--progress 0..1)
 ```
 
 See it in motion — render any screen, or the whole display loop of the real
@@ -88,9 +100,10 @@ See it in motion — render any screen, or the whole display loop of the real
 tracked one is the README demo above):
 
 ```
-python3 sim/run_main.py --seconds 18 --gif /tmp/rotation.gif   # clock -> weather -> hi/lo -> CO2
+python3 sim/run_main.py --seconds 26 --gif /tmp/rotation.gif   # full loop incl. spotify (mocked)
 python3 sim/sim.py play --screen icons --frames 8 --gif /tmp/icons.gif
 python3 sim/sim.py play --screen weather --code 61 --temp 21 --frames 12 --gif /tmp/rain.gif
+python3 sim/sim.py play --screen spotify --text "Radiohead - Creep" --frames 24 --gif /tmp/spotify.gif
 ```
 
 HITL review on the physical board (see all icons before approving a PR):
@@ -111,7 +124,7 @@ automatically:
 ```
 python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
                               # writes /tmp/pr_<screen>_{before,after,compare}.gif per screen
-                              # (weather/icons/clock/hilo/co2) plus pr_rotation_* — a full mocked
+                              # (weather/icons/clock/hilo/co2/spotify) plus pr_rotation_* — a full mocked
                               # run of the real main.py (sim/run_main.py), robust to screen changes.
                               # "icons" is a contact sheet of every animated weather icon
                               # (WMO code x day/night) in one GIF. --ref takes the PR base SHA

@@ -215,6 +215,140 @@ class TestCO2(unittest.TestCase):
                              % (ppm, lit, want))
 
 
+class TestMarquee(unittest.TestCase):
+    """draw_marquee: short text is centered and static; long text is held,
+    then scrolls left 1 px/frame and wraps through a blank gap."""
+
+    X0 = 9
+
+    def _leftmost(self, fb):
+        xs = [x for x in range(self.X0, W) for y in range(H)
+              if fb[y][x] != (0, 0, 0)]
+        return min(xs) if xs else None
+
+    def test_short_text_centered_and_static(self):
+        d = simmod.SimGraphics(W, H)
+        tw = d.measure_text("Hi", 1)
+        self.assertLessEqual(tw, W - self.X0)
+        fbs = [frame(lambda d, f: render.draw_marquee(d, W, H, "Hi", f, self.X0), f)
+               for f in range(16)]
+        for fb in fbs:
+            # centered within the marquee area [X0, W-1], not the full frame
+            lo, hi = lit_span(fb)
+            self.assertLessEqual(abs((lo - self.X0) - (W - 1 - hi)), 1,
+                                 "short marquee not centered in its area: %s"
+                                 % ((lo, hi),))
+        self.assertTrue(all(ascii_of(fb) == ascii_of(fbs[0]) for fb in fbs),
+                        "short marquee must not scroll")
+
+    def _edges(self, fb):
+        xs = [x for x in range(self.X0, W) for y in range(H)
+              if fb[y][x] != (0, 0, 0)]
+        return (min(xs), max(xs)) if xs else (None, None)
+
+    def _expected_edges(self, text, off):
+        """Mirror the bitmap6 layout: char advance = width + 1 px spacing,
+        clipped to the marquee area [X0, W-1]."""
+        import font6_data
+        cx = self.X0 - off
+        lo = hi = None
+        for ch in text:
+            o = ord(ch)
+            if 32 <= o < 128:
+                w = font6_data.WIDTHS[o - 32]
+                cols = font6_data.GLYPHS[ch]
+                for c in range(w):
+                    if cols[c] and self.X0 <= cx + c <= W - 1:
+                        x = cx + c
+                        lo = x if lo is None else min(lo, x)
+                        hi = x if hi is None else max(hi, x)
+                cx += w + 1
+            else:
+                cx += 1
+        return lo, hi
+
+    def test_long_text_hold_scroll_wrap(self):
+        text = "Radiohead - Creep"
+        d = simmod.SimGraphics(W, H)
+        tw = d.measure_text(text, 1)
+        self.assertGreater(tw, W - self.X0)  # must actually scroll
+        hold, gap = 8, 6
+        period = tw + gap
+        fbs = [frame(lambda d, f: render.draw_marquee(d, W, H, text, f, self.X0),
+                     f) for f in range(hold + period + 1)]
+        # hold: identical frames, text parked at the left edge of the area
+        for f in range(hold):
+            self.assertEqual(ascii_of(fbs[f]), ascii_of(fbs[0]),
+                             "frame %d moved during hold" % f)
+        self.assertEqual(self._edges(fbs[0]), self._expected_edges(text, 0))
+        # scroll: 1 px left per frame; the tail passes x0, a blank gap, wrap
+        for off in range(period):
+            self.assertEqual(self._edges(fbs[hold + off]),
+                             self._expected_edges(text, off),
+                             "off=%d edges=%s want %s"
+                             % (off, self._edges(fbs[hold + off]),
+                                self._expected_edges(text, off)))
+        # the text really leaves the area at some point (blank gap) and the
+        # wrap brings it back to the parked position after one period
+        self.assertIn((None, None), [self._edges(fb) for fb in fbs])
+        self.assertEqual(self._edges(fbs[hold + period]), self._edges(fbs[hold]))
+
+
+class TestSpotify(unittest.TestCase):
+    """draw_spotify: green note icon left, marquee right, progress bar bottom."""
+
+    def test_icon_and_progress(self):
+        fb = frame(lambda d, f: render.draw_spotify(d, W, H, "A - B", 0, 0.5))
+        # icon: every lit pixel left of the marquee area is brand green
+        icon_px = [fb[y][x] for x in range(render.NOTE_TEXT_X) for y in range(H)
+                   if fb[y][x] != (0, 0, 0) and y < H - 1]
+        self.assertTrue(icon_px, "no note icon drawn")
+        self.assertEqual(set(icon_px), {render.SPOTIFY})
+        # progress bar: bottom row, fill width = int(progress * W)
+        row = fb[H - 1]
+        self.assertEqual(row[:int(0.5 * W)], [render.SPOTIFY] * int(0.5 * W))
+        self.assertEqual(row[int(0.5 * W):], [render.SPOTIFY_DIM] * (W - int(0.5 * W)))
+
+    def test_playing_vs_paused_text_color(self):
+        playing = frame(lambda d, f: render.draw_spotify(d, W, H, "A - B", 0, 0.5,
+                                                         True))
+        paused = frame(lambda d, f: render.draw_spotify(d, W, H, "A - B", 0, 0.5,
+                                                        False))
+        text_px = lambda fb: {fb[y][x] for x in range(render.NOTE_TEXT_X, W)
+                              for y in range(H - 1) if fb[y][x] != (0, 0, 0)}
+        self.assertEqual(text_px(playing), {render.WHITE})
+        self.assertEqual(text_px(paused), {render.PAUSED})
+
+    def test_marquee_uses_spotify_area(self):
+        # the marquee starts at NOTE_TEXT_X and never draws over the icon
+        fb = frame(lambda d, f: render.draw_spotify(d, W, H, "A - B", 0, 0.0))
+        for x in range(render.NOTE_TEXT_X):
+            for y in range(2, H - 1):  # text rows only (icon lives in 1..9)
+                if fb[y][x] != (0, 0, 0):
+                    self.assertIn((x, y), {(px, py + 1) for (px, py) in render.NOTE_PX})
+
+
+GOLDEN_SPOTIFY_F0 = (
+    '                                                     \n'
+    '    +++                                              \n'
+    '    + +                                              \n'
+    '    ++              @@@@              @@@            \n'
+    '    +              @   @             @  @            \n'
+    '    +              @   @     @@@     @@@@            \n'
+    '    +              @@@@@             @   @           \n'
+    '  +++              @   @             @@@@            \n'
+    ' ++++                                                \n'
+    ' ++++                                                \n'
+    '++++++++++++++++++++++++++:::::::::::::::::::::::::::'
+)
+
+
+class TestGoldenSpotify(unittest.TestCase):
+    def test_spotify_frame0(self):
+        fb = frame(lambda d, f: render.draw_spotify(d, W, H, "A - B", 0, 0.5), 0)
+        self.assertEqual(ascii_of(fb), GOLDEN_SPOTIFY_F0)
+
+
 GOLDEN_BOOT_WIFI_F0 = (
     '                                                     \n'
     '                                                     \n'
@@ -440,6 +574,20 @@ class TestRunMainMocked(unittest.TestCase):
                              "ppm=%s beeps=%s want %s"
                              % (ppm, run_main.FakeChannel.beeps, want_beeps))
 
+    def test_rotation_includes_spotify(self):
+        # the mocked spotify token must make the now-playing screen appear
+        # after the co2 screen (clock 5 + weather 5 + hilo 5 + co2 5 = 20 s)
+        frames = run_main.run_screen_current("draw_spotify", 30.0)
+        self.assertTrue(frames, "spotify screen never appeared in the rotation")
+        # the canned track drives the marquee + the green progress bar
+        self.assertTrue(any(fb[H - 1][x] == render.SPOTIFY
+                            for fb in frames for x in range(W)),
+                        "spotify progress bar never drawn")
+        self.assertTrue(any(fb[y][x] == render.SPOTIFY
+                            for fb in frames
+                            for x in range(render.NOTE_TEXT_X) for y in range(H)),
+                        "spotify note icon never drawn")
+
     def test_run_main_wrappers_preserve_signatures(self):
         # before_after.render_icons detects day/night via inspect.signature;
         # run_main's wrappers must not hide is_day (regression: after-side
@@ -462,7 +610,7 @@ class TestRunMainMocked(unittest.TestCase):
         import io
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run_main.run_current(22.0)  # one full rotation is 20s
+            run_main.run_current(32.0)  # one full rotation is 25s (5 screens)
         out = buf.getvalue()
         self.assertIn("sys: light=2048/4095", out)  # canned gu.light()
         self.assertIn("temp=24.18C", out)            # canned ADC(4) = 14117

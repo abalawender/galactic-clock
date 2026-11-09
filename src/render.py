@@ -35,6 +35,9 @@ CO2_RED_PPM = 1200   # at/above this it goes red — and the audible alarm fires
 CO2_OK = (80, 220, 80)
 CO2_WARN = (255, 200, 0)
 CO2_BAD = (255, 60, 60)
+SPOTIFY = (30, 215, 96)      # brand green: note icon + progress fill
+SPOTIFY_DIM = (16, 84, 38)   # progress-bar track
+PAUSED = (110, 110, 110)     # marquee text while paused
 
 TEXT_Y = 2
 
@@ -357,6 +360,51 @@ def co2_color(ppm):
 def draw_message(d, w, h, msg):
     d.set_pen(d.create_pen(*MSG))
     d.text(msg, 4, TEXT_Y, scale=1)
+
+
+# --- spotify now-playing screen ---------------------------------------------
+# Green eighth note on the left, scrolling "artist - title" marquee right of
+# it, and a 1 px track progress bar along the bottom edge.
+
+# Eighth note, 7x9 (x 0..6, y 0..8), drawn at (0, 1): flag top-right, stem at
+# x=4, head at the bottom-left of the stem.
+NOTE_PX = ((5, 0), (6, 0), (6, 1), (5, 2),
+           (4, 0), (4, 1), (4, 2), (4, 3), (4, 4), (4, 5), (4, 6), (4, 7),
+           (4, 8),
+           (2, 6), (3, 6), (1, 7), (2, 7), (3, 7), (1, 8), (2, 8), (3, 8))
+NOTE_TEXT_X = 9  # marquee area starts right of the 7 px icon (+ 2 px gap)
+
+
+def draw_marquee(d, w, h, text, frame, x0, color=WHITE, hold=8, gap=6):
+    """Scrolling text in the area right of x0. Held at x0 for `hold` frames,
+    then moves left 1 px per frame; once the tail has passed x0, a `gap`-px
+    blank wraps around and the text re-enters from the right. Text that fits
+    the area is centered instead of scrolling."""
+    tw = d.measure_text(text, 1)
+    d.set_pen(d.create_pen(*color))
+    if tw <= w - x0:
+        d.text(text, x0 + (w - x0 - tw) // 2, TEXT_Y, scale=1)
+        return
+    off = (frame - hold) % (tw + gap) if frame >= hold else 0
+    d.text(text, x0 - off, TEXT_Y, scale=1)
+
+
+def draw_spotify(d, w, h, line, frame, progress=0.0, playing=True):
+    """Now-playing screen: note icon + marquee + progress bar. `line` is
+    "artist - title", `progress` in 0..1; paused playback dims the text."""
+    draw_marquee(d, w, h, line, frame, NOTE_TEXT_X,
+                 color=(WHITE if playing else PAUSED))
+    # the marquee scrolls left past NOTE_TEXT_X — mask the icon gutter so
+    # the text never bleeds into it, then draw the note on top
+    d.set_pen(d.create_pen(*BLACK))
+    d.rectangle(0, 0, NOTE_TEXT_X, h - 1)
+    d.set_pen(d.create_pen(*SPOTIFY))
+    for (x, y) in NOTE_PX:
+        d.pixel(x, 1 + y)
+    d.set_pen(d.create_pen(*SPOTIFY_DIM))
+    d.rectangle(0, h - 1, w, 1)
+    d.set_pen(d.create_pen(*SPOTIFY))
+    d.rectangle(0, h - 1, int(progress * w), 1)
 
 
 # 8 spinner positions around a center pixel

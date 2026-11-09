@@ -43,6 +43,15 @@ CANNED_WX = {
     "current": {"temperature_2m": 21.3, "weather_code": 61},
     "daily": {"temperature_2m_max": [25.4], "temperature_2m_min": [17.6]},
 }
+# canned /v1/me/player/currently-playing response (the real secrets.py token
+# is never read)
+CANNED_SPOTIFY = {
+    "is_playing": True,
+    "progress_ms": 66000,
+    "item": {"name": "Creep",
+             "artists": [{"name": "Radiohead"}],
+             "duration_ms": 238000},
+}
 CANNED_CO2 = 812  # ppm reported by the mocked SCD41 (tests override)
 CANNED_LIGHT = 2048.0  # gu.light() raw 0..4095 (tests override)
 SYNCED_EPOCH = 1793972928.0  # pretend NTP fixed the RTC to this
@@ -209,11 +218,17 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
         side_effect=lambda: state.update(t=SYNCED_EPOCH, start=None))
 
     class FakeResp:
-        status_code = 200
-        content = json.dumps(CANNED_WX).encode()
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self.content = json.dumps(payload).encode()
+
+    def _fake_get(url, headers=None):
+        if "api.spotify.com" in url:
+            return FakeResp(200, CANNED_SPOTIFY)
+        return FakeResp(200, CANNED_WX)
 
     urequests = types.ModuleType("urequests")
-    urequests.get = mock.Mock(side_effect=lambda url: FakeResp())
+    urequests.get = mock.Mock(side_effect=_fake_get)
     ujson = types.ModuleType("ujson")
     ujson.loads = json.loads
     ujson.dumps = json.dumps
@@ -222,6 +237,7 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     for k in ("LOCATION_LAT", "LOCATION_LON", "TZ", "WIFI_PASSWORD", "WIFI_SSID"):
         setattr(secrets, k, "mock")
     secrets.SCD41_ALTITUDE_M = 470  # canned, like the other secrets
+    secrets.SPOTIFY_TOKEN = "mock-token"  # enables the spotify screen
     secrets.TZ = "Europe/Warsaw"  # canned timezone, exercises tz.utc_offset
 
     pimoroni_i2c = types.ModuleType("pimoroni_i2c")
@@ -277,7 +293,10 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     assert urequests.get.called, "main.py never fetched weather"
     if WIFI_OK:
         assert ntptime.settime.called, "main.py never synced the RTC"
-    assert "api.open-meteo.com" in urequests.get.call_args[0][0]
+    # the last GET may be spotify (polled after the weather), so scan all calls
+    assert any("api.open-meteo.com" in c[0][0]
+               for c in urequests.get.call_args_list), \
+        "main.py never fetched weather"
     return g["gu"].frames
 
 

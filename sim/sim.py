@@ -22,8 +22,9 @@ Usage:
     python3 sim/before_after.py --ref main --out /tmp/pr
                                  # before/after/compare GIFs per screen, from a git ref
 
-Screens: weather (icon + temp), clock, hilo, message. --frames N renders N
-animation ticks (frame 0..N-1); --delay sets playback seconds per frame.
+Screens: weather (icon + temp), clock, hilo, co2, boot, message, spotify
+(note icon + scrolling --text marquee + --progress bar). --frames N renders
+N animation ticks (frame 0..N-1); --delay sets playback seconds per frame.
 """
 import argparse
 import inspect
@@ -130,6 +131,9 @@ def make_screen_fn(args):
             d, W, H, args.label or BOOT_STAGES[min(f // 4, len(BOOT_STAGES) - 1)], f)
     if args.screen == "message":
         return lambda d, f: render.draw_message(d, W, H, args.message)
+    if args.screen == "spotify":
+        return lambda d, f: render.draw_spotify(d, W, H, args.text, f,
+                                                args.progress, not args.paused)
     raise SystemExit("unknown screen: %s" % args.screen)
 
 
@@ -176,7 +180,8 @@ def main():
                     help="play: animate in terminal; print: plain ASCII frames "
                          "to stdout (no escape codes)")
     ap.add_argument("--screen", default="weather",
-                    choices=["weather", "clock", "hilo", "co2", "boot", "message", "icons"])
+                    choices=["weather", "clock", "hilo", "co2", "boot", "message",
+                             "spotify", "icons"])
     ap.add_argument("--code", type=int, default=61, help="WMO weather code (weather screen)")
     ap.add_argument("--temp", type=int, default=21, help="current temperature C")
     ap.add_argument("--night", action="store_true", help="weather screen: night (moon)")
@@ -186,6 +191,12 @@ def main():
     ap.add_argument("--label", default=None,
                     help="fixed stage label (boot screen); default cycles boot/wifi/ntp/weather")
     ap.add_argument("--message", default="no weather")
+    ap.add_argument("--text", default="The Artist - Song Title",
+                    help="marquee line (spotify screen)")
+    ap.add_argument("--progress", type=float, default=0.37,
+                    help="track progress 0..1 (spotify screen)")
+    ap.add_argument("--paused", action="store_true",
+                    help="spotify screen: paused (dim marquee, no scroll)")
     ap.add_argument("--frames", type=int, default=12)
     ap.add_argument("--delay", type=float, default=0.15, help="seconds per frame in play mode")
     ap.add_argument("--gif", default=None,

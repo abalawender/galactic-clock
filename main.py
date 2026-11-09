@@ -4,7 +4,8 @@ Connects to WiFi (credentials in /secrets.py, not committed), syncs the RTC
 via NTP (clock on screen), fetches the forecast from open-meteo (no API key
 needed), reads a local SCD41 CO2 sensor over I2C (breakout_scd41 is frozen
 into Pimoroni's MicroPython), and rotates the screens on the 53x11 matrix:
-clock, weather icon + temperature, high/low, CO2 ppm. Board telemetry
+clock, weather icon + temperature, high/low, CO2 ppm, and — when a Spotify
+access token is configured in secrets.py — the now-playing track. Board telemetry
 (ambient light, die temperature) is logged over UART each rotation, and
 VSYS once at boot with the radio powered down (GP29 is the Pico W radio's
 SPI CS, so it is only measurable with WLAN off). A boot/loading screen is
@@ -33,10 +34,16 @@ try:
 except ImportError:
     SCD41_ALTITUDE_M = 0
 
+try:
+    from secrets import SPOTIFY_TOKEN  # optional; absent = no spotify screen
+except ImportError:
+    SPOTIFY_TOKEN = None
+
 import render
 import tz
 
 WX_URL = "https://api.open-meteo.com/v1/forecast"
+SPOTIFY_URL = "https://api.spotify.com/v1/me/player/currently-playing"
 REFRESH_S = 600
 
 # SCD41 on the STEMMA QT / Qwiic connector
@@ -219,6 +226,56 @@ def co2_alarm(ppm):
     print("CO2 ALARM: %d ppm, light %d" % (ppm, gu.light()))
 
 
+def fetch_spotify():
+    """Currently-playing track from the Spotify Web API, polled once per
+    rotation. None when no token is configured, nothing is playing (204), or
+    the request fails (e.g. 401 on an expired token) — the screen is then
+    simply skipped. A bearer token with scope user-read-currently-playing
+    is needed; tokens live 1 h, so for this prototype a fresh one is pasted
+    into secrets.py (see secrets.example.py)."""
+    if not SPOTIFY_TOKEN:
+        return None
+    try:
+        r = urequests.get(SPOTIFY_URL,
+                          headers={"Authorization": "Bearer " + SPOTIFY_TOKEN})
+        if r.status_code == 204:
+            return None  # no active playback device
+        if r.status_code != 200:
+            raise RuntimeError("spotify http %d" % r.status_code)
+        j = ujson.loads(r.content)
+        item = j.get("item") or {}
+        artists = item.get("artists") or []
+        artist = artists[0].get("name", "?") if artists else "?"
+        dur = item.get("duration_ms") or 1
+        progress = j.get("progress_ms", 0) / dur
+        if progress < 0.0:
+            progress = 0.0
+        elif progress > 1.0:
+            progress = 1.0
+        return {"line": "%s - %s" % (artist, item.get("name", "?")),
+                "progress": progress,
+                "playing": bool(j.get("is_playing", True))}
+    except Exception as e:
+        print("spotify fetch failed:", e)
+        return None
+
+
+spotify_frame = 0  # persistent across rotations: the marquee resumes where it stopped
+
+
+def show_spotify(sp, seconds):
+    global spotify_frame
+    end = time.time() + seconds
+    while time.time() < end:
+        render.clear(d, W, H)
+        render.draw_spotify(d, W, H, sp["line"], spotify_frame,
+                            sp["progress"], sp["playing"])
+        gu.update(d)
+        if sp["playing"]:
+            spotify_frame += 1  # paused: freeze the marquee
+        time.sleep(0.1)
+
+
 def read_sys():
     """(ALS raw 0..4095, die temp C): gu.light() and the RP2040 temp ADC
     (27 - (V-0.706)/0.001721). Temp is a float — the formula has a
@@ -284,6 +341,7 @@ def main():
                 except Exception as e:
                     print("weather fetch failed:", e)
                     wx = None
+            sp = fetch_spotify()
             show_clock(5)
             if wx is not None:
                 show_weather(wx, 5)
@@ -295,6 +353,9 @@ def main():
                 # alarm fires inside show_co2 right after the first frame,
                 # so the beep overlaps the screen instead of preceding it
                 show_co2(co2, 5, alarm=True)
+            if sp is not None:
+                print("spotify: %s" % sp["line"])
+                show_spotify(sp, 5)
             log_sys()
         except Exception as e:
             print("loop error:", e)
