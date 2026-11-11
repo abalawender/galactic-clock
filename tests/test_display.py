@@ -469,6 +469,36 @@ class TestRunMainMocked(unittest.TestCase):
         # VSYS is measured once at boot with the radio off (ADC(29) canned)
         self.assertIn("sys: vsys=4.99V (radio off)", out)
 
+    def test_clock_shown_when_ntp_synced(self):
+        # default mock: wifi ok -> NTP syncs the RTC to 2026 -> clock appears
+        clocks = run_main.run_screen_current("draw_clock", 10.0)
+        self.assertTrue(clocks, "clock screen never appeared after NTP sync")
+
+    def test_clock_hidden_when_rtc_unsynced_and_before_2026(self):
+        # wifi down (no NTP) and the RTC still at its 2023 boot epoch: the
+        # clock must not be shown — its slot shows a message instead
+        run_main.WIFI_OK = False
+        try:
+            clocks = run_main.run_screen_current("draw_clock", 26.0)
+            msgs = run_main.run_screen_current("draw_message", 26.0)
+        finally:
+            run_main.WIFI_OK = True
+        self.assertFalse(clocks,
+                         "clock shown although RTC is 2023 and never NTP-synced")
+        self.assertTrue(msgs, "no message shown in the clock slot")
+
+    def test_clock_shown_when_rtc_already_2026_without_ntp(self):
+        # a soft reset keeps the RTC running: no NTP this boot, but the RTC
+        # already reads >= 2026 -> the clock may be shown
+        run_main.WIFI_OK = False
+        run_main.BOOT_EPOCH = run_main.SYNCED_EPOCH  # RTC kept at 2026
+        try:
+            clocks = run_main.run_screen_current("draw_clock", 26.0)
+        finally:
+            run_main.WIFI_OK = True
+            run_main.BOOT_EPOCH = 1700000000.0
+        self.assertTrue(clocks, "clock hidden although RTC reads >= 2026")
+
     def test_wifi_failure_does_not_kill_loop(self):
         # wifi down: the loop must survive (show "no wifi"/"no weather")
         # instead of raising out of main()

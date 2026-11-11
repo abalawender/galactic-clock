@@ -8,7 +8,10 @@ clock, weather icon + temperature, high/low, CO2 ppm. Board telemetry
 (ambient light, die temperature) is logged over UART each rotation, and
 VSYS once at boot with the radio powered down (GP29 is the Pico W radio's
 SPI CS, so it is only measurable with WLAN off). A boot/loading screen is
-shown while WiFi connects so the matrix is never blank at startup.
+shown while WiFi connects so the matrix is never blank at startup. The clock
+screen is only shown when the RTC is trustworthy — NTP-synced at least once
+this boot, or already reading >= 2026 (a soft reset keeps the RTC running);
+otherwise its slot shows "no ntp" instead of a wrong time.
 
 All drawing lives in render.py (pure, board-independent) so it can also run in
 the host simulator: python3 sim/sim.py play --screen weather --code 61
@@ -38,6 +41,7 @@ import tz
 
 WX_URL = "https://api.open-meteo.com/v1/forecast"
 REFRESH_S = 600
+RTC_TRUST_YEAR = 2026  # an unsynced RP2040 RTC boots at 2021-01-01; a synced one is >= 2026
 
 # SCD41 on the STEMMA QT / Qwiic connector
 I2C_SDA_PIN = 4
@@ -93,7 +97,20 @@ def read_vsys(wlan):
     return vsys
 
 
+ntp_synced = False  # latched: the RTC was synced via NTP at least once this boot
+
+
+def rtc_trusted():
+    """True when the clock may be shown: NTP-synced at least once, or the
+    RTC already reads >= RTC_TRUST_YEAR (a soft/watchdog reset keeps the RTC
+    running, so it stays trustworthy until NTP re-syncs)."""
+    return ntp_synced or time.localtime()[0] >= RTC_TRUST_YEAR
+
+
 def connect_wifi():
+    """Connect WiFi and sync the RTC via NTP; returns wlan (None on failure).
+    A successful NTP sync latches the global ntp_synced (see rtc_trusted)."""
+    global ntp_synced
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     wlan.connect(WIFI_SSID, WIFI_PASSWORD)
@@ -109,10 +126,11 @@ def connect_wifi():
         tick_boot("ntp")
         try:
             ntptime.settime()
+            ntp_synced = True
             break
         except OSError:
             time.sleep(1)
-    print("rtc synced, epoch:", time.time())
+    print("rtc synced" if ntp_synced else "ntp sync failed", "epoch:", time.time())
     return wlan
 
 
@@ -284,7 +302,12 @@ def main():
                 except Exception as e:
                     print("weather fetch failed:", e)
                     wx = None
-            show_clock(5)
+            if rtc_trusted():
+                show_clock(5)
+            else:
+                # never NTP-synced and RTC still < 2026 (fresh boot): showing
+                # the clock would display a wrong time — message instead
+                show_text("no ntp", 5)
             if wx is not None:
                 show_weather(wx, 5)
                 show_hilo(wx, 5)
