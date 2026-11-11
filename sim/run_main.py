@@ -47,6 +47,8 @@ CANNED_CO2 = 812  # ppm reported by the mocked SCD41 (tests override)
 CANNED_LIGHT = 2048.0  # gu.light() raw 0..4095 (tests override)
 SYNCED_EPOCH = 1793972928.0  # pretend NTP fixed the RTC to this
 WIFI_OK = True  # tests can set False to simulate a failed wifi connect
+BOOT_EPOCH = 1700000000.0  # RTC epoch at boot, before any NTP sync (2023; tests
+# can set SYNCED_EPOCH to simulate a soft reset that kept the RTC running)
 
 
 class FakePimoroniI2C:
@@ -115,7 +117,7 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     render.* function appends a copy of the bitmap to capture_out — i.e. the
     exact screen the ref's own main.py drew, with its own frame argument.
     """
-    state = {"t": 1700000000.0, "start": None}
+    state = {"t": BOOT_EPOCH, "start": None}
     real_time = sys.modules.get("time")
 
     fake_time = types.ModuleType("time")

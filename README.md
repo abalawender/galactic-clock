@@ -4,7 +4,9 @@ Pimoroni Galactic Unicorn (53x11 LED matrix) on a Raspberry Pi Pico W running
 MicroPython. A weather clock that rotates four screens on the matrix:
 
 - **clock** — local time, RTC synced via NTP (EU DST computed in pure integer
-  math in `src/tz.py` — MicroPython has no tzdata), blinking colon
+  math in `src/tz.py` — MicroPython has no tzdata), blinking colon; shown only
+  when the RTC is trustworthy (NTP-synced, or already reading >= 2026 after a
+  soft reset) — otherwise the slot shows `no ntp`
 - **weather** — animated 10x11 icon + current temperature from open-meteo (no
   API key); icons are hand-drawn pixel art per WMO code with day/night variants
   (twinkling sun/moon, drifting fog bands, falling rain/snow, flashing storm bolt)
