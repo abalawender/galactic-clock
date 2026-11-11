@@ -499,6 +499,20 @@ class TestRunMainMocked(unittest.TestCase):
             run_main.BOOT_EPOCH = 1700000000.0
         self.assertTrue(clocks, "clock hidden although RTC reads >= 2026")
 
+    def test_wifi_retried_after_boot_failure(self):
+        # wifi failed at boot: connect_wifi must be retried from the loop
+        # (WIFI_RETRY_S apart), and the loop must stay alive meanwhile
+        run_main.WIFI_OK = False
+        run_main.FakeWLAN.connect_calls = 0
+        try:
+            # 130s: 20s boot timeout + two 20s rotations + one 20s retry
+            frames = run_main.run_current(130.0)
+        finally:
+            run_main.WIFI_OK = True
+        self.assertGreaterEqual(run_main.FakeWLAN.connect_calls, 2,
+                                "wifi was not retried after the boot failure")
+        self.assertGreater(len(frames), 30, "loop died while retrying wifi")
+
     def test_wifi_failure_does_not_kill_loop(self):
         # wifi down: the loop must survive (show "no wifi"/"no weather")
         # instead of raising out of main()
