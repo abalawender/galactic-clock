@@ -59,6 +59,22 @@ class FakePimoroniI2C:
         return [0x62]  # SCD41 present
 
 
+class FakeWLAN:
+    connect_calls = 0  # wifi connect attempts (boot + retries); tests reset
+
+    def active(self, on):
+        pass
+
+    def connect(self, ssid, pw):
+        FakeWLAN.connect_calls += 1
+
+    def isconnected(self):
+        return WIFI_OK
+
+    def ifconfig(self):
+        return ("192.168.1.42", "255.255.255.0", "192.168.1.1", "1.1.1.1")
+
+
 class FakeSCD41:
     """Canned SCD41: CANNED_CO2 ppm, 21.5 C, 45 %RH, always ready. Last instance
     is kept on the class so tests can introspect what main.py configured."""
@@ -186,19 +202,6 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     picographics = types.ModuleType("picographics")
     picographics.DISPLAY_GALACTIC_UNICORN = 0
     picographics.PicoGraphics = lambda display=0: simmod.SimGraphics(W, H)
-
-    class FakeWLAN:
-        def active(self, on):
-            pass
-
-        def connect(self, ssid, pw):
-            pass
-
-        def isconnected(self):
-            return WIFI_OK
-
-        def ifconfig(self):
-            return ("192.168.1.42", "255.255.255.0", "192.168.1.1", "1.1.1.1")
 
     network = types.ModuleType("network")
     network.STA_IF = 0

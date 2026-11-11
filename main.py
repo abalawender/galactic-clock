@@ -11,7 +11,9 @@ SPI CS, so it is only measurable with WLAN off). A boot/loading screen is
 shown while WiFi connects so the matrix is never blank at startup. The clock
 screen is only shown when the RTC is trustworthy — NTP-synced at least once
 this boot, or already reading >= 2026 (a soft reset keeps the RTC running);
-otherwise its slot shows "no ntp" instead of a wrong time.
+otherwise its slot shows "no ntp" instead of a wrong time. If WiFi could
+not connect at boot (or drops later) it is retried periodically in the loop,
+and a reconnect re-runs the NTP sync.
 
 All drawing lives in render.py (pure, board-independent) so it can also run in
 the host simulator: python3 sim/sim.py play --screen weather --code 61
@@ -42,6 +44,7 @@ import tz
 WX_URL = "https://api.open-meteo.com/v1/forecast"
 REFRESH_S = 600
 RTC_TRUST_YEAR = 2026  # an unsynced RP2040 RTC boots at 2021-01-01; a synced one is >= 2026
+WIFI_RETRY_S = 60      # retry a failed/dropped wifi connect at most this often
 
 # SCD41 on the STEMMA QT / Qwiic connector
 I2C_SDA_PIN = 4
@@ -269,7 +272,8 @@ def main():
     # wlan.active(False) -> read -> reconnect cycle, ~seconds of wifi down
     pre = network.WLAN(network.STA_IF)
     print("sys: vsys=%.2fV (radio off)" % read_vsys(pre))
-    wlan = connect_wifi()  # None on failure — the loop below shows "no wifi"
+    wlan = connect_wifi()  # None on failure — retried in the loop below
+    last_wifi_try = time.time()
     if wlan is None:
         show_now("no wifi")
     sensor = None
@@ -291,6 +295,12 @@ def main():
         # one bad iteration must not kill the clock (a dead loop = blank
         # matrix); show the error and keep rotating
         try:
+            if (wlan is None or not wlan.isconnected()) \
+                    and time.time() - last_wifi_try >= WIFI_RETRY_S:
+                # wifi failed at boot or dropped: keep retrying — a successful
+                # connect re-runs NTP (connect_wifi latches ntp_synced)
+                last_wifi_try = time.time()
+                wlan = connect_wifi()
             if wx is None or time.time() - last_fetch > REFRESH_S:
                 tick_boot("weather")
                 try:
