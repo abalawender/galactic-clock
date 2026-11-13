@@ -234,6 +234,12 @@ matrix_deadline = 0.0        # time.time() epoch when the rain ends; 0 = off
 btn_last_press_ms = None     # ticks_ms() of the last accepted press (None:
                              # no accepted edge yet — ticks_ms wraps, so a
                              # literal 0 would poison the first diffs)
+rain_exiting = False         # True once the exit dissolve has begun; a
+                             # press must not re-arm the deadline mid-ramp
+                             # (a late bounce edge >DEBOUNCE_MS after the
+                             # press that ended the rain used to re-set the
+                             # deadline, cancelling the exit — the animation
+                             # froze and rain resumed for another 120 s)
 
 
 def _rain_button_irq(pin):
@@ -245,6 +251,8 @@ def _rain_button_irq(pin):
             time.ticks_diff(now_ms, btn_last_press_ms) < BUTTON_DEBOUNCE_MS:
         return  # bounce inside the debounce window: ignore
     btn_last_press_ms = now_ms
+    if rain_exiting:
+        return  # exit ramp in flight: this press must not re-arm
     if matrix_deadline > time.time():
         matrix_deadline = 0.0
     else:
@@ -272,14 +280,14 @@ def maybe_show_rain():
     The clock phases in on entry (one fade level every other frame, ~0.3 s)
     and dissolves out on exit the moment it begins (draw_rain_clock's exit:
     no separate pour phase — the field pours over while the ink converts
-    pixel by pixel, ~1.3 s to the last drop off screen). A second press
+    pixel by pixel, ending the moment the clock is fully gone). A second press
     zeroes the deadline (the loop notices within a frame and dissolves) and
     the timebox ends the mode on its own. Paces to
     RAIN_FPS by absolute ticks_us deadlines — render+scanout (~32 ms of the
     33 ms budget) decide whether a frame lands on time; when the loop falls
     behind it restarts the schedule instead of burst-catching-up, so fps
     sags briefly rather than speeds up."""
-    global matrix_deadline, anim_frame
+    global matrix_deadline, anim_frame, rain_exiting
     if matrix_deadline <= time.time():
         return
     print("matrix rain: on (%d s or until A again)" % MATRIX_MODE_S)
@@ -295,11 +303,15 @@ def maybe_show_rain():
     while True:
         past_deadline = time.time() >= matrix_deadline
         if past_deadline:
+            # latch the exit: until the dissolve has finished, a press (or a
+            # late bounce edge from the one that ended the rain) must not
+            # re-arm the deadline and cancel the animation halfway
+            rain_exiting = True
             if not rtc_trusted() or \
                     dissolve >= render.MATRIX_DISSOLVE_STEPS:
                 break
             if anim_frame % 2 == 0:
-                dissolve += 1    # the whole exit: ~20 steps = ~1.3 s
+                dissolve += 1    # the whole exit: ~1 s total
         elif rtc_trusted():
             # 4 dither levels, one every other frame: a ~0.3 s ramp. A step
             # allocates nothing (the Bayer dither just lights more of the
@@ -339,6 +351,7 @@ def maybe_show_rain():
             next_frame_us = time.ticks_us()
     print("matrix rain: off")
     matrix_deadline = 0.0
+    rain_exiting = False       # ramp finished — a fresh press may rain again
 
 
 # the audible alarm fires at render.CO2_RED_PPM — the same level that turns
