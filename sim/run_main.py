@@ -2,7 +2,8 @@
 """Run the actual main.py fully mocked and capture what the matrix would show.
 
 Mocks sit at the hardware/internet/time boundary — galactic (incl. gu.light()),
-picographics, machine.ADC,
+picographics, machine.ADC/machine.Pin (buttons: FakePin plays a
+press/release pattern for tests),
 network, ntptime, urequests, ujson, secrets, time, and the Pimoroni sensor
 modules (pimoroni_i2c, breakout_scd41, frozen into the board firmware) —
 which is stable, so the
@@ -125,6 +126,45 @@ def _git_show(ref, path):
     return r.stdout if r.returncode == 0 else None
 
 
+class FakePin:
+    """machine.Pin stub for the button code. The app registers an IRQ handler
+    via irq(); every sleep() call in the mocked time module fires registered
+    handlers when the virtual clock crosses press_at epochs — tests then
+    inject presses deterministically (board buttons are active-low, the IRQ
+    trigger is falling edge). value() plays press_pattern[call#] for level
+    polling if any screen code reads levels."""
+    press_pattern = (1,)
+    press_at = ()                 # virtual epochs; one press per entry
+    handlers = ()                 # handlers registered by the app
+    fired = ()                    # press_at indexes already fired
+
+    @classmethod
+    def maybe_fire(cls, now):
+        if not cls.handlers:
+            return
+        for i in cls.press_at:
+            if i not in cls.fired and now >= i:
+                cls.fired += (i,)
+                for h in cls.handlers:
+                    h(None)
+
+    def __init__(self, *a, **k):
+        self.calls = 0
+
+    def value(self):
+        p = FakePin.press_pattern
+        v = p[min(self.calls, len(p) - 1)]
+        self.calls += 1
+        return v
+
+    def irq(self, handler, trigger=None):
+        FakePin.handlers = (handler,)  # each app run (re)registers one
+
+    # IRQ trigger bits, same values as machine.Pin on this port
+    IRQ_RISING = 4
+    IRQ_FALLING = 8
+
+
 def run_main_src(src, seconds, render_src=None, capture_func=None,
                  capture_out=None):
     """Exec one main.py source with all externals mocked; return frame list.
@@ -142,6 +182,10 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     # (jumps of 3 per second, which is what made rain appear to fall upwards)
     fake_time.time = lambda: int(state["t"])
     fake_time.ticks_ms = lambda: int(state["t"] * 1000) % (1 << 30)
+    # MicroPython ticks_diff: wraparound-aware signed difference over the
+    # full ticks range (used by the button debounce)
+    fake_time.ticks_diff = lambda a, b: \
+        ((a - b + (1 << 29)) % (1 << 30)) - (1 << 29)
     fake_time.localtime = lambda t=None: real_time.gmtime(
         state["t"] if t is None else t)
 
@@ -149,6 +193,7 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
         if state["start"] is None:
             state["start"] = state["t"]
         state["t"] += s
+        FakePin.maybe_fire(state["t"])  # injected button presses
         if state["t"] - state["start"] >= seconds:
             raise _Stop()
 
@@ -160,6 +205,17 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
 
     class FakeGu:
         WIDTH, HEIGHT = W, H
+        # button pins, same map as the frozen galactic firmware
+        # (probed on hardware: A=0 B=1 C=3 D=6, BRI 21/26, VOL 7/8, SLEEP 27)
+        SWITCH_A = 0
+        SWITCH_B = 1
+        SWITCH_C = 3
+        SWITCH_D = 6
+        SWITCH_BRIGHTNESS_UP = 21
+        SWITCH_BRIGHTNESS_DOWN = 26
+        SWITCH_VOLUME_UP = 7
+        SWITCH_VOLUME_DOWN = 8
+        SWITCH_SLEEP = 27
 
         def __init__(self):
             self.frames = []
@@ -196,6 +252,11 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
             return FakeADC.READINGS.get(self.ch, 0)
 
     machine.ADC = FakeADC
+
+    machine.Pin = FakePin
+    machine.Pin.IN = 0     # pin mode/pull constants, same numbers as the board
+    machine.Pin.OUT = 1
+    machine.Pin.PULL_UP = 2
 
     galactic = types.ModuleType("galactic")
     galactic.GalacticUnicorn = FakeGu
@@ -268,6 +329,7 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
 
     # patch.dict swaps the stub modules in and restores them atomically,
     # even if the app code raises
+    FakePin.fired = ()  # each app run starts with untriggered press injections
     try:
         with mock.patch.dict(sys.modules, stubs):
             g = {"__name__": "__main__"}

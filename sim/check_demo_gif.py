@@ -22,12 +22,13 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "src"))
 sys.path.insert(0, HERE)
 
+import render  # noqa: E402
 import run_main  # noqa: E402
 from gif import fb_to_image  # noqa: E402
 
 # keep in sync with the README regenerate command (scale is run_main's default)
 DEMO_GIF = os.path.join(REPO, "docs", "demo-rotation.gif")
-DEMO_SECONDS = 18.0
+DEMO_SECONDS = 24.0  # must span a full ~20 s rotation (no matrix slot in it)
 DEMO_DELAY_MS = 120
 DEMO_SCALE = 8
 W, H = 53, 11
@@ -86,21 +87,69 @@ def compare(frames, gif_path, scale, delay_ms):
 
 def check(gif_path=DEMO_GIF, seconds=DEMO_SECONDS, scale=DEMO_SCALE,
           delay_ms=DEMO_DELAY_MS):
-    """Render the demo with the current code and compare against the GIF."""
-    return compare(run_main.run_current(seconds), gif_path, scale, delay_ms)
+    """Render the demos with the current code and compare against the GIFs."""
+    problems = compare(run_main.run_current(seconds), gif_path, scale, delay_ms)
+    problems += compare_matrix_gif()
+    return problems
+
+
+# Keep in sync with the README matrix regenerate command below.
+MATRIX_GIF = os.path.join(REPO, "docs", "demo-matrix.gif")
+MATRIX_FRAMES = 60
+MATRIX_DELAY_MS = 50  # the on-board matrix tick (show_anim tick=0.05)
+MATRIX_SCALE = 8
+
+
+def matrix_frames():
+    """The exact frames the tracked docs/demo-matrix.gif must contain."""
+    import sim as simmod  # noqa: E402  (run_main import above set up sys.path)
+    out = []
+    for f in range(MATRIX_FRAMES):
+        d = simmod.SimGraphics(W, H)
+        render.clear(d, W, H)
+        render.draw_matrix(d, W, H, f)
+        out.append(d.fb)
+    return out
+
+
+def compare_matrix_gif():
+    """docs/demo-matrix.gif check: frame count, size, tempo, pixels. Matrix
+    frames always differ from each other (the rain never stops), so a
+    straightforward one-to-one comparison needs no delay expansion."""
+
+    if not os.path.exists(MATRIX_GIF):
+        return ["%s does not exist" % MATRIX_GIF]
+    got = gif_frames(MATRIX_GIF)
+    expected = [(fb_to_image(fb, MATRIX_SCALE).tobytes(),
+                 (W * MATRIX_SCALE, H * MATRIX_SCALE))
+                for fb in matrix_frames()]
+    problems = []
+    if len(got) != len(expected):
+        problems.append("matrix gif: %d frames, code renders %d"
+                        % (len(got), len(expected)))
+    for i, ((px, size, dur), (epx, esize)) in enumerate(zip(got, expected)):
+        if size != esize:
+            problems.append("matrix gif frame %d size %s" % (i, (size, esize)))
+        elif px != epx:
+            problems.append("matrix gif frame %d pixels differ" % i)
+    return problems
 
 
 def main():
     problems = check()
     if problems:
-        print("FAIL: docs/demo-rotation.gif does not match the current code:")
+        print("FAIL: tracked demo gifs do not match the current code:")
         for p in problems[:10]:
             print("  - %s" % p)
         print("regenerate with: python3 sim/run_main.py --seconds %g"
               " --delay %g --gif docs/demo-rotation.gif"
               % (DEMO_SECONDS, DEMO_DELAY_MS / 1000.0))
+        print("            and: python3 sim/sim.py play --screen matrix"
+              " --frames %d --delay %g --gif docs/demo-matrix.gif"
+              % (MATRIX_FRAMES, MATRIX_DELAY_MS / 1000.0))
         return 1
-    print("OK: docs/demo-rotation.gif matches the current code")
+    print("OK: docs/demo-rotation.gif + docs/demo-matrix.gif match the"
+          " current code")
     return 0
 
 

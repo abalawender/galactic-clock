@@ -67,7 +67,8 @@ def _boot(d, R, f):
 
 
 SCREENS = {"clock": (_clock, 30), "hilo": (_hilo, 1), "co2": (_co2, 1),
-           "boot": (_boot, 16)}
+           "boot": (_boot, 16),
+           "matrix": (lambda d, R, f: R.draw_matrix(d, W, H, f), 24)}
 
 # Weather goes through the real main loop on both sides (see module docstring).
 WEATHER_FUNC = "draw_weather"
