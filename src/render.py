@@ -442,8 +442,14 @@ MATRIX_STAGGER_STEPS = 4   # the ink-to-drop conversion waves through:
                            # crumble is obvious from the very first step
                            # (a finer 9-step spread read as a separate
                            # "pour" stage first, crumble later)
-MATRIX_DISSOLVE_STEPS = (MATRIX_STAGGER_STEPS + 11)
-                           # +11 = one drop falling clear of the matrix
+MATRIX_DISSOLVE_STEPS = (MATRIX_STAGGER_STEPS + 10)
+                           # stagger - 1 (the last conversion step) + 9 rows
+                           # of travel for the slowest stride-1 drop from the
+                           # top ink row + 2 trail rows — exactly the step
+                           # where the last trail pixel clears the bottom:
+                           # the mode ends with the clock fully gone, no
+                           # bare-rain epilogue after it
+
 
 # bitmap6 digits, embedded (same bytes as sim/font6_data.py, itself a copy
 # of Pimoroni's frozen font): the exit ramp needs per-pixel access to the

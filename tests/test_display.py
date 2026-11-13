@@ -389,6 +389,34 @@ class TestAnimations(unittest.TestCase):
         self.assertGreater(len(clocks), 26,
                            "rotation never resumed after the second press")
 
+    def test_late_bounce_edge_after_exit_press_cannot_rearm_the_rain(self):
+        # the press that ends the rain can shed a late bounce edge outside
+        # the 50 ms debounce window (>100 ms apart on real buttons). The
+        # handler must not re-arm the deadline while the exit dissolve is
+        # in flight — that cancelled the animation halfway (it froze mid-
+        # crumble and the rain resumed for another 120 s), so the fade-out
+        # only ever played while the button was being pressed.
+        press = 21.0
+        exit_press = 27.0
+        bounce = 27.1          # 100 ms later, past the debounce window
+        rain = self._with_presses((press, exit_press, bounce),
+                                  "draw_matrix", 60.0)
+        clocks = self._with_presses((press, exit_press, bounce),
+                                    "draw_clock", 60.0)
+        # control: the same presses without the bounce edge
+        clean = self._with_presses((press, exit_press), "draw_clock", 60.0)
+        self.assertTrue(rain, "the first press never started the rain")
+        self.assertGreater(len(clean), 26,
+                           "control run: rotation never resumed after the "
+                           "second press")
+        # the bounce edge must be a no-op: the rotation resumes exactly as
+        # in the bounce-free run (without the latch the re-armed deadline
+        # cancelled the dissolve and rained on, postponing the rotation)
+        self.assertEqual(len(clocks), len(clean),
+                         "the bounce re-armed the rain deadline mid-dissolve "
+                         "(%d clock frames vs clean %d)"
+                         % (len(clocks), len(clean)))
+
     def test_rain_timebox_returns_to_rotation(self):
         # one press at 21 s: rain until 141 s, then the rotation rotates on
         # (two or more clock fills become visible over the run)
