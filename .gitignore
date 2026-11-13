@@ -8,4 +8,4 @@ secrets.py
 frames/
 *.gif
 !docs/demo-rotation.gif
-!docs/demo-matrix.gif
+!docs/demo-rainclock.gif

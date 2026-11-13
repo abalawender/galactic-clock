@@ -70,61 +70,6 @@ SCREENS = {"clock": (_clock, 30), "hilo": (_hilo, 1), "co2": (_co2, 1),
            "boot": (_boot, 16),
            "matrix": (lambda d, R, f: R.draw_matrix(d, W, H, f), 24)}
 
-# rain-clock episode: the screen is only interesting across its transitions
-# (field pouring bare -> clock fading in -> steady -> press -> ink crumbling
-# to drops -> gone), so it gets its own frame builder instead of a fixed
-# steady draw like the SCREENS above. Frame counts ride the render module's
-# own constants, with fallbacks so older refs (no episode constants, or a
-# draw_rain_clock without the fade/dissolve parameters) still render.
-RAINCLOCK_STEADY_FRAMES = 16
-RAINCLOCK_TAIL_FRAMES = 2
-
-
-def _rainclock_frames(R):
-    fade_steps = getattr(R, "MATRIX_FADE_STEPS", 0)
-    dissolve_steps = getattr(R, "MATRIX_DISSOLVE_STEPS", 0)
-    has_ramp = fade_steps > 0 or dissolve_steps > 0
-    frames = []
-
-    def episode_draw(d, f, kwargs=None):
-        if kwargs is None:
-            # ref predates the fade/dissolve parameters (or the mode itself)
-            R.draw_rain_clock(d, W, H, "21", "34", f % 2 == 0, f)
-        else:
-            R.draw_rain_clock(d, W, H, "21", "34", f % 2 == 0, f, **kwargs)
-
-    f = 0
-    for _ in range(fade_steps * 2):           # entry: overlay fades in over
-        d = simmod.SimGraphics(W, H)          # the bare field, a level every
-        R.clear(d, W, H)                      # other frame, like the board
-        episode_draw(d, f, dict(fade=min(fade_steps, f // 2 + 1)))
-        f += 1
-        frames.append(d.fb)
-    for _ in range(RAINCLOCK_STEADY_FRAMES):
-        d = simmod.SimGraphics(W, H)
-        R.clear(d, W, H)
-        episode_draw(d, f, dict(fade=fade_steps if has_ramp else None))
-        f += 1
-        frames.append(d.fb)
-    for _ in range(dissolve_steps * 2):       # exit: the ink converts and
-        d = simmod.SimGraphics(W, H)          # crumbles away, a step every
-        R.clear(d, W, H)                      # other rain frame
-        fade_t = fade_steps
-        exit_pos = f - fade_t * 2 - RAINCLOCK_STEADY_FRAMES
-        episode_draw(d, f, dict(
-            fade=fade_steps,
-            # dissolve counts EXIT half-steps:
-            # the fade ramp already ate half of f
-            dissolve=exit_pos // 2 + 1))
-        f += 1
-        frames.append(d.fb)
-    for _ in range(RAINCLOCK_TAIL_FRAMES if dissolve_steps else 0):
-        d = simmod.SimGraphics(W, H)          # bare field after the clock is
-        R.clear(d, W, H)                      # fully gone
-        episode_draw(d, f, dict(fade=0))
-        f += 1
-        frames.append(d.fb)
-    return frames
 
 # Weather goes through the real main loop on both sides (see module docstring).
 WEATHER_FUNC = "draw_weather"
@@ -262,11 +207,11 @@ def main():
                     print("icons: before unavailable at %s (%s) — after-only"
                           % (args.ref, e))
         elif screen == "rainclock":
-            after = _rainclock_frames(render)
+            after = simmod.render_rainclock_episode(render)
             before = None
             if R_base is not None:
                 try:
-                    before = _rainclock_frames(R_base)
+                    before = simmod.render_rainclock_episode(R_base)
                 except Exception as e:
                     print("rainclock: before unavailable at %s (%s) "
                           "— after-only" % (args.ref, e))
