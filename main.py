@@ -255,15 +255,14 @@ def maybe_show_rain():
     """Slot boundary: while button A's rain deadline is in the future, run
     full-screen matrix rain instead of the following data screens, the clock
     poured over the field (render.draw_rain_clock) when the RTC is trusted.
-    The clock overlay phases in on entry and out on exit: one fade level
-    every other frame (~0.5 s each way, render.MATRIX_FADE_STEPS levels), so
-    the clock dissolves into the rain instead of popping. A second press
-    zeroes the deadline (the loop notices within a frame and fades out) and
-    the timebox ends the mode on its own. Paces to RAIN_FPS by absolute
-    ticks_us deadlines — render+scanout (~32 ms of the 33 ms budget) decide
-    whether a frame lands on time; when the loop falls behind it restarts
-    the schedule instead of burst-catching-up, so fps sags briefly rather
-    than speeds up."""
+    The clock phases in on entry (one fade level every 4th frame, ~0.5 s)
+    and rains down on exit (draw_rain_clock's dissolve, one step every other
+    frame). A second press zeroes the deadline (the loop notices within a
+    frame and dissolves) and the timebox ends the mode on its own. Paces to
+    RAIN_FPS by absolute ticks_us deadlines — render+scanout (~32 ms of the
+    33 ms budget) decide whether a frame lands on time; when the loop falls
+    behind it restarts the schedule instead of burst-catching-up, so fps
+    sags briefly rather than speeds up."""
     global matrix_deadline, anim_frame
     if matrix_deadline <= time.time():
         return
@@ -276,29 +275,44 @@ def maybe_show_rain():
     gc.collect()
     next_frame_us = time.ticks_us()
     fade = 0
+    dissolve = 0
     while True:
         past_deadline = time.time() >= matrix_deadline
         if past_deadline:
-            if fade == 0:        # rain over (a second press fades too)
+            if not rtc_trusted() or \
+                    dissolve >= render.MATRIX_DISSOLVE_STEPS:
                 break
             if anim_frame % 2 == 0:
-                fade -= 1
-                if fade <= 0:
-                    break
+                dissolve += 1    # one trail row every other frame (~0.6 s)
         elif rtc_trusted():
-            # rain pours over the clock: localtime() is UTC on this build —
-            # apply the tz offset ourselves (same path as show_clock); with
-            # the RTC untrusted the rain runs alone rather than show a wrong
-            # time (same rule as the rotation's clock-hiding)
-            if fade < render.MATRIX_FADE_STEPS and anim_frame % 2 == 0:
+            # 4 dither levels, one every 4th frame: ~0.5 s ramp. A step
+            # allocates nothing (the Bayer dither just lights more of the
+            # existing dim pens — see render._BAYER4), so the ramp runs at
+            # full fps instead of stuttering; the mode entry's collect
+            # covers the only real burst (a level's first masked pixels)
+            if fade < render.MATRIX_FADE_STEPS and anim_frame % 4 == 0:
                 fade += 1
-            t = time.localtime(time.time() + tz.utc_offset(TZ, time.time()))
-            render.draw_rain_clock(d, W, H, "%02d" % t[3], "%02d" % t[4],
-                                   time.ticks_ms() % 1000 < 500, anim_frame,
-                                   fade=fade)
-        else:
-            render.clear(d, W, H)
-            render.draw_matrix(d, W, H, anim_frame)
+        try:
+            if rtc_trusted():
+                # rain pours over the clock: localtime() is UTC on this
+                # build — apply the tz offset ourselves (same path as
+                # show_clock); with the RTC untrusted the rain runs alone
+                # rather than show a wrong time (same rule as the
+                # rotation's clock-hiding)
+                t = time.localtime(time.time() + tz.utc_offset(TZ, time.time()))
+                render.draw_rain_clock(d, W, H, "%02d" % t[3], "%02d" % t[4],
+                                       time.ticks_ms() % 1000 < 500,
+                                       anim_frame, fade=fade,
+                                       dissolve=dissolve)
+            else:
+                render.clear(d, W, H)
+                render.draw_matrix(d, W, H, anim_frame)
+        except MemoryError:
+            # belt and braces: the pen memo is a rebuildable cache — if a
+            # frame ever runs out of heap, drop it (the next frame
+            # repopulates it) instead of erroring the whole loop
+            render._PEN_MEMO.clear()
+            gc.collect()
         anim_frame += 1
         gu.update(d)
         next_frame_us = time.ticks_add(next_frame_us, RAIN_FRAME_US)
@@ -444,7 +458,9 @@ def main():
             maybe_show_rain()
         except Exception as e:
             print("loop error:", e)
-            show_text("err", 5)
+            # the first thing on screen must say *what* failed — the board
+            # itself is the only REPL that always captures this
+            show_text("err %s" % type(e).__name__[:9], 5)
 
 
 if __name__ == "__main__":

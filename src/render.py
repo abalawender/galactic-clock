@@ -418,27 +418,38 @@ def _build_fade(L16):
 # The rain-clock overlay: rain inside the clock's text box is dimmed toward
 # MATRIX_DIM % of its alpha (draw_matrix's optional dim_mask, built by
 # draw_rain_clock), so the bright digits read over the pouring field even
-# where a drop head passes directly behind them. The dim strength is keyed
-# by the overlay's fade LEVEL, not a flag: draw_rain_clock phases the
-# overlay in/out over MATRIX_FADE_STEPS quantized levels, and the level is
-# part of the pen-memo key so every level owns its own pens (a stronger
-# level's pixels never collide with a dimmer one's — bits 26..29, above
-# L16's last bit 25).
+# where a drop head passes directly behind them. The level is a flag in the
+# pen-memo key (bit 28, above L16's last bit 25) so the dimmed pens never
+# collide with the full-brightness ones of the same alpha bucket.
 MATRIX_DIM = 35          # % of full alpha at the overlay's full strength
-MATRIX_FADE_STEPS = 8    # 0 = bare rain, no digits; STEPS = full overlay
+_KEY_DIM = 1 << 28
+MATRIX_FADE_STEPS = 4    # dither levels: 0 = bare rain; STEPS = fully dim
+# entry ramp: the dim does not re-press every in-box pixel with a level
+# (that multiplied the pen space per level and stuttered the fade-in —
+# burst-created pens + heap dips at dict growth); instead the box is dimmed
+# through an ordered 4x4 Bayer pattern: at level L every box pixel whose
+# threshold < L draws dim, so the dim patch spreads over the text box in a
+# regular sweep while *no* pen is created for the fade itself — a level
+# step costs nothing per frame and the ramp stays at full fps.
+_BAYER4 = ((0, 2, 0, 2), (3, 1, 3, 1), (0, 2, 0, 2), (3, 1, 3, 1))
+# exit: how far the dissolving clock falls before it is gone — the digits
+# dim while copies of them trail down one row per dissolve step, so this
+# many steps takes the last trail off the bottom of the matrix
+MATRIX_DISSOLVE_STEPS = 9
 
 
 _FADE_TAB = {L * SUB: _build_fade(L * SUB) for L in (4, 5, 6)}
 
 
-def draw_matrix(d, w, h, frame, dim_mask=None, dim_level=MATRIX_FADE_STEPS):
+def draw_matrix(d, w, h, frame, dim_mask=None):
     """Green code-rain falling down the whole matrix: one anti-aliased drop
     per column, staggered speeds and phases (five speed/brightness tiers,
     see MATRIX_TIERS), head pixel cycling through MATRIX_TINTS and settling
     to its pass hue halfway down; trail pixels keep their emission-time hue.
     dim_mask (rain-clock overlay, draw_rain_clock) is a w*h bytearray
-    laid out [x * h + j]: pixels flagged there draw at the dim strength of
-    dim_level (0 = bare rain; the caller skips the mask in that case).
+    laid out [x * h + j] holding the fade level (0..MATRIX_FADE_STEPS): an
+    in-box pixel draws dim when its Bayer threshold is under that level
+    (level STEPS dims every box pixel); a bare rain has no mask at all.
     Fixed-point math only — identical output on board and host sim.
     Rasterizer is board-tuned: no min/max calls, memoized pens, bound
     attribute lookups."""
@@ -449,11 +460,6 @@ def draw_matrix(d, w, h, frame, dim_mask=None, dim_level=MATRIX_FADE_STEPS):
     memo = _PEN_MEMO
     mget = memo.get
     mask = dim_mask
-    # overlay dimming: quantized fade level -> % of full alpha (the level
-    # rides the pen memo's key, see MATRIX_FADE_STEPS above the function)
-    dimb = (dim_level << 26) if mask else 0
-    dimp = MATRIX_DIM if dim_level >= MATRIX_FADE_STEPS \
-        else 100 - (100 - MATRIX_DIM) * dim_level // MATRIX_FADE_STEPS
     for x in range(w):
         c16, L16, bright, seed_v = matrix_col(x, h, frame)
         if L16 == 0:            # resting pass: the cov math below would
@@ -500,23 +506,41 @@ def draw_matrix(d, w, h, frame, dim_mask=None, dim_level=MATRIX_FADE_STEPS):
                 dc = L16 - 1
             a = cov * fade[dc]      # 0..SUB*L16 alpha numerator
             if mask:
-                if mask[mo + j]:
-                    a = a * dimp // 100
+                # fade-level dither (see _BAYER4): the mask byte carries the
+                # ramp level; a pixel draws dim the moment the level sweeps
+                # past its Bayer threshold — no per-level pens exist at all
+                if mask[mo + j] > _BAYER4[x & 3][j & 3]:
+                    a = a * MATRIX_DIM // 100
+                    is_dim = True
+                else:
+                    is_dim = False
+            else:
+                is_dim = False
             # memo key: alpha is quantized to its top 4 bits' index (q, at
             # most ~89 levels) — without this the exact subpixel alpha set
             # grows with every frame's fractional head position and the memo
             # is effectively unbounded (filled the heap in ~3 s on board);
             # pens are built from the bucket MIDPOINT so colors are
             # order-independent and identical on sim and board. a < 2**11,
-            # so q < 2**7; ti < 8; bright <= 100, L16 < 2**7; bits 26..29
-            # carry the rain-clock overlay's fade level (MASK_FADE_STEPS)
-            # so the dimmed alpha spaces never share a pen with the
-            # full-brightness ones.
-            q = a >> 4
-            key = (q | (ti << 8) | (bright << 12) | (L16 << 19) | dimb)
+            # so q < 2**7; ti < 8; bright <= 100, L16 < 2**7; bit 28 marks a
+            # dim-masked pixel (rain-clock overlay) so the darkened alpha
+            # space never shares a pen with the full-brightness one.
+            if is_dim:
+                # in-box dimmed pixels sit behind the dim mask and the
+                # digits: the 4-bit bucket count is invisible there, and a
+                # full 120 s rain once measured 4831 pens (2.3x the bare
+                # memo) and collapsed the heap at dict growth (the ERR-on-
+                # press bug). The 2-bit bucket count keeps the overlay's
+                # share of the memo small.
+                sh = 6
+            else:
+                sh = 4
+            q = a >> sh                     # bucket index (floor, as before)
+            key = (q | (ti << 8) | (bright << 12) | (L16 << 19) |
+                   (_KEY_DIM if is_dim else 0))
             pen = mget(key)
             if pen is None:
-                am = (q << 4) | 8           # bucket midpoint alpha
+                am = (q << sh) + (1 << (sh - 1))  # bucket midpoint alpha
                 den = SUB * L16 * 100
                 tc = MATRIX_TINTS[ti]
                 pen = create_pen(tc[0] * am * bright // den,
@@ -529,35 +553,79 @@ def draw_matrix(d, w, h, frame, dim_mask=None, dim_level=MATRIX_FADE_STEPS):
 
 # --- screens --------------------------------------------------------------
 
-def draw_rain_clock(d, w, h, hh, mm, blink, frame, fade=MATRIX_FADE_STEPS):
+def draw_rain_clock(d, w, h, hh, mm, blink, frame, fade=MATRIX_FADE_STEPS,
+                    dissolve=0):
     """Clock rendered through the matrix rain (the mode shown while button
     A's rain deadline is live): the field keeps falling everywhere, but its
     alpha is scaled down inside the clock's padded text box so the bright
     digits read clearly while drops visibly pour across them. fade phases
-    the overlay (matrix mode's entry/exit): 0 = bare rain, no digits;
+    the overlay in (matrix mode's entry): 0 = bare rain, no digits;
     MATRIX_FADE_STEPS = the full overlay. Digit brightness rides the same
-    fade, so the clock dissolves into the field instead of popping in/out.
-    Blink and the HH/MM layout reuse draw_clock; same deterministic
-    contract as the plain rain (frame tick only)."""
+    fade, so the clock materializes out of the field instead of popping in.
+    dissolve phases it out (the exit): the dim box drops, the digits dim
+    to black and every lit digit pixel rains down as a shrinking grey
+    streak — redrawn via d.text at descending offsets, so the streaks are
+    pixel-exact to the digits and stay deterministic. Blink and the HH/MM
+    layout reuse draw_clock; same contract as the plain rain (frame tick
+    only)."""
     clear(d, w, h)               # draw_matrix only paints the rain pixels
+    if dissolve > 0:             # exit ramp: the clock rains down
+        draw_matrix(d, w, h, frame)
+        if dissolve >= MATRIX_DISSOLVE_STEPS:
+            return
+        colon_adv = 3
+        tw = d.measure_text(hh, 1) + colon_adv + d.measure_text(mm, 1)
+        x = (w - tw) // 2
+        step = dissolve
+        # when the last streak falls off the bottom the digits are gone:
+        # base digits dim as the dissolve progresses, streak copies below
+        # are dimmer still, dimming with distance in the streak
+        bah = 255 * (MATRIX_DISSOLVE_STEPS - step) // MATRIX_DISSOLVE_STEPS
+        d.set_pen(d.create_pen(bah, bah, bah))
+        d.text(hh, x, TEXT_Y, scale=1)
+        mm_x = x + d.measure_text(hh, 1) + colon_adv
+        d.text(mm, mm_x, TEXT_Y, scale=1)
+        for i in range(1, step):
+            sh = bah * (step - i) // step
+            d.set_pen(d.create_pen(sh, sh, sh))
+            d.text(hh, x, TEXT_Y + i, scale=1)
+            d.text(mm, mm_x, TEXT_Y + i, scale=1)
+        return
     if fade <= 0:                # bare rain: no box, no digits
         draw_matrix(d, w, h, frame)
         return
-    # the digits brighten on the same quantized ramp as the rain dims —
-    # one interpolated pen per frame (draw_clock converges blink pixels
-    # onto it)
+    # the digits brighten on the same quantized ramp as the box dithers in —
+    # one interpolated pen per frame (draw_clock converges blink pixels onto
+    # it)
     dh = 255 * fade // MATRIX_FADE_STEPS
-    mask = bytearray(w * h)
-    # same layout math as draw_clock, padded a pixel on each side
+    # the mask buffer is reused across frames — a fresh bytearray every
+    # frame poked the GC (which scans the big pen-memo dict) and showed up
+    # as fps drops on board; zeroing the cached one is a C-speed slice copy
+    global _RC_MASK, _RC_ZEROS
+    mask = _RC_MASK
+    if mask is None or len(mask) != w * h:
+        _RC_MASK = bytearray(w * h)
+        _RC_ZEROS = bytes(w * h)
+        mask = _RC_MASK
+    else:
+        mask[:] = _RC_ZEROS
+    # same layout math as draw_clock, padded a pixel on each side; each box
+    # pixel carries the fade level so draw_matrix can compare it against the
+    # pixel's Bayer threshold (see _BAYER4) — the dither dim is free of pens
     colon_adv = 3
     tw = d.measure_text(hh, 1) + colon_adv + d.measure_text(mm, 1)
     x0 = max(0, (w - tw) // 2 - 1)
     x1 = min(w, x0 + tw + 2)
     for x in range(x0, x1):
         for j in range(1, min(h, TEXT_Y + 7)):
-            mask[x * h + j] = 1
-    draw_matrix(d, w, h, frame, dim_mask=mask, dim_level=fade)
+            mask[x * h + j] = fade
+    draw_matrix(d, w, h, frame, dim_mask=mask)
     draw_clock(d, w, h, hh, mm, blink, color=(dh, dh, dh))
+
+
+# rain-clock dim mask, reused across frames (see draw_rain_clock)
+_RC_MASK = None
+_RC_ZEROS = None
 
 
 def draw_weather(d, w, h, code, temp_text, frame, is_day=1):
