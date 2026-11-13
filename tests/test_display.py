@@ -456,7 +456,7 @@ class TestAnimations(unittest.TestCase):
         mask = bytearray(W * H)
         for x in range(W):
             for j in range(H):
-                mask[x * H + j] = 1
+                mask[x * H + j] = render.MATRIX_FADE_STEPS  # fully dimmed
         produced_rain = False
         for f in range(0, 90, 5):
             dim_fb = frame(lambda d, ff: render.draw_matrix(
@@ -469,6 +469,39 @@ class TestAnimations(unittest.TestCase):
             if any(p[1] > 200 for row in full_fb for p in row):
                 produced_rain = True
         self.assertTrue(produced_rain, "control run: no bright rain at all")
+
+    def test_fade_dither_sweeps_the_box(self):
+        # the ramp is a Bayer-ordered dither: level 1 dims only the pixels
+        # under the 0 threshold, level 4 dims every box pixel — and every
+        # pixel dimmed at a level stays dimmed at all higher levels
+        saw_leak = saw_partial = full = False
+        for f in range(0, 90, 9):
+            for level in range(1, render.MATRIX_FADE_STEPS + 1):
+                mask = bytearray(W * H)
+                for x in range(W):
+                    for j in range(H):
+                        mask[x * H + j] = level
+                fb = frame(lambda d, ff: render.draw_matrix(
+                    d, W, H, ff, dim_mask=mask), f)
+                bright_in_box = sum(
+                    1 for y in range(H) for x in range(W)
+                    if fb[y][x][1] > 120)
+                if level == render.MATRIX_FADE_STEPS:
+                    self.assertEqual(
+                        bright_in_box, 0,
+                        "level %d left bright pixels: dither never "
+                        "completes" % level)
+                    full = True
+                elif bright_in_box:
+                    saw_partial = True
+                else:
+                    saw_leak = True   # a low level that fully dims too soon
+        self.assertTrue(saw_partial,
+                        "no intermediate level leaves rain visible — the "
+                        "dither has no effect")
+        self.assertFalse(saw_leak,
+                         "an intermediate level fully dims the field")
+        self.assertTrue(full, "the full-level never fully dimmed")
 
     def test_rain_clock_fades_in_and_out(self):
         # fade phases the overlay: 0 = bare rain (no digits, identical
@@ -527,6 +560,46 @@ class TestAnimations(unittest.TestCase):
             d, W, H, "23", "59", False, ff, fade=0), 10)
         self.assertNotIn(render.WHITE, (px for row in gone for px in row),
                          "digits visible at fade 0")
+
+    def test_rain_clock_dissolves_into_falling_droplets(self):
+        # the exit ramp: dissolve>0 drops the dim box (rain full strength
+        # everywhere again) and the digits rain down — dimming digit copies
+        # trailing below, no white anywhere, nothing left at the last step
+        last = frame(lambda d, ff: render.draw_rain_clock(
+            d, W, H, "23", "59", False, ff,
+            dissolve=render.MATRIX_DISSOLVE_STEPS), 10)
+        bare = frame(lambda d, ff: render.draw_matrix(d, W, H, ff), 10)
+        self.assertEqual(last, bare,
+                         "the dissolved clock did not reduce to bare rain")
+        # the digit zone dims strictly with each step; trails of the same
+        # grey shades appear below it (rain pixels are green-dominant, so a
+        # neutral grey = digit/trail ink)
+        grey_max = {}
+        trailing = {}
+        for step in (1, 3, 6):
+            fb = frame(lambda d, ff: render.draw_rain_clock(
+                d, W, H, "23", "59", False, ff, dissolve=step), 10)
+            self.assertNotIn(render.WHITE,
+                             (px for row in fb for px in row),
+                             "bright digit left during dissolve")
+            gmax, trail = 0, []
+            for y in range(H):
+                for x in range(W):
+                    r, g, b = fb[y][x]
+                    if r == g == b and 0 < r <= 255:
+                        gmax = max(gmax, r)
+                        if y >= render.TEXT_Y + 2:
+                            trail.append((x, y))
+            grey_max[step] = gmax
+            trailing[step] = trail
+        self.assertGreater(grey_max[1], grey_max[3])
+        self.assertGreater(grey_max[3], grey_max[6])
+        self.assertGreater(trailing[3], [],
+                           "no droplet trails below the clock at step 3")
+        self.assertGreater(max(y for _, y in trailing[6]),
+                           max(y for _, y in trailing[3]),
+                           "trails do not fall further as the dissolve "
+                           "advances")
 
 
 GOLDEN_WEATHER_RAIN_F0 = (

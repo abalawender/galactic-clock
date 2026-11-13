@@ -26,8 +26,10 @@ from a deterministic LCG (no randomness — sim and board render identically).
 One press plays it full-screen for two minutes (a second press stops it early),
 then the regular rotation resumes. With a trusted RTC the clock shows through
 the rain (`sim/sim.py --screen rainclock`): the clock phases in over ~0.5 s
-on entry and back out on exit, and at full strength the field dims to 35 %
-alpha inside the clock's text box while bright white digits draw on top, so
+on entry and rains down on exit (the digits dim while copies of them trail
+off the bottom of the matrix), and at full strength the field dims to 35 %
+alpha inside
+the clock's text box while bright white digits draw on top, so
 the rain visibly
 pours across the time; without a trusted RTC the rain runs alone (same rule as
 the rotation's clock-hiding). The rain keeps a persistent frame tick
