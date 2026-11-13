@@ -432,10 +432,32 @@ MATRIX_FADE_STEPS = 4    # dither levels: 0 = bare rain; STEPS = fully dim
 # regular sweep while *no* pen is created for the fade itself — a level
 # step costs nothing per frame and the ramp stays at full fps.
 _BAYER4 = ((0, 2, 0, 2), (3, 1, 3, 1), (0, 2, 0, 2), (3, 1, 3, 1))
-# exit: how far the dissolving clock falls before it is gone — the digits
-# dim while copies of them trail down one row per dissolve step, so this
-# many steps takes the last trail off the bottom of the matrix
-MATRIX_DISSOLVE_STEPS = 9
+# exit: no dedicated pour phase — the moment the mode ends, the dim box
+# lifts, the full rain pours over the still-bright clock AND the clock's
+# ink starts converting to droplets one pixel at a time (organic: each
+# pixel's conversion step and fall speed come from a hash), falling off
+# the bottom like the rest of the rain.
+MATRIX_STAGGER_STEPS = 4   # the ink-to-drop conversion waves through:
+                           # ~1/4 of the clock converts per step, so the
+                           # crumble is obvious from the very first step
+                           # (a finer 9-step spread read as a separate
+                           # "pour" stage first, crumble later)
+MATRIX_DISSOLVE_STEPS = (MATRIX_STAGGER_STEPS + 11)
+                           # +11 = one drop falling clear of the matrix
+
+# bitmap6 digits, embedded (same bytes as sim/font6_data.py, itself a copy
+# of Pimoroni's frozen font): the exit ramp needs per-pixel access to the
+# glyph shapes and the board's PicoGraphics can't read its own text back.
+# Each glyph is column bytes; bit r of byte c = pixel (c, r), 6 rows tall.
+# tests/test_display.py pins this copy against the real font via the sim.
+_DIGIT_GLYPHS = {
+    "0": (28, 34, 34, 34, 30, 0), "1": (2, 62, 0, 0, 0, 0),
+    "2": (50, 42, 42, 36, 0, 0),  "3": (42, 42, 42, 22, 0, 0),
+    "4": (14, 16, 16, 62, 16, 0), "5": (46, 42, 42, 18, 0, 0),
+    "6": (60, 42, 42, 42, 18, 0), "7": (6, 2, 34, 18, 14, 0),
+    "8": (20, 42, 42, 42, 22, 0), "9": (4, 42, 42, 42, 30, 0),
+}
+_DIGIT_WIDTHS = (5, 2, 4, 4, 5, 4, 5, 5, 5, 5)   # bitmap6 widths for 0..9
 
 
 _FADE_TAB = {L * SUB: _build_fade(L * SUB) for L in (4, 5, 6)}
@@ -553,6 +575,72 @@ def draw_matrix(d, w, h, frame, dim_mask=None):
 
 # --- screens --------------------------------------------------------------
 
+
+def _clock_ink(d, w, h, hh, mm):
+    """The clock's ink as [(x, y, convert_at, fall_speed)] over the same
+    layout math draw_clock uses (no blink dots): x/y from the embedded
+    digit glyphs, convert_at = the dissolve step this pixel turns into a
+    drop (hashed: staggered, organic — never the whole clock at once, and
+    never before the pour is over), fall_speed = 1 or 2 rows per step.
+    Cached per (hh, mm, w): it only changes once a minute."""
+    global _INK_CACHE
+    key = (hh, mm, w)
+    if _INK_CACHE is not None and _INK_CACHE[0] == key:
+        return _INK_CACHE[1]
+    ink = []
+    mhh = d.measure_text(hh, 1)
+    base_x = ((w - (mhh + 3 + d.measure_text(mm, 1))) // 2)
+    for base, s in ((base_x, hh), (base_x + mhh + 3, mm)):
+        cx = base
+        for ch in s:
+            o = ord(ch) - 48
+            if 0 <= o <= 9:
+                cols = _DIGIT_GLYPHS[ch]
+                gw = _DIGIT_WIDTHS[o]
+                for col in range(gw):
+                    bits = cols[col]
+                    for row in range(6):
+                        if bits >> row & 1:
+                            px = cx + col
+                            py = TEXT_Y + row
+                            if py < h:
+                                hs = _hash16(px + py * w, 4)
+                                ink.append((
+                                    px, py,
+                                    hs % MATRIX_STAGGER_STEPS,
+                                    1 + (hs >> 7) % 2))
+                cx += gw + 1   # one column of glyph + spacing, like font6
+            else:
+                cx += 2        # gaps advance like measure_text
+    _INK_CACHE = (key, ink)
+    return ink
+
+
+def _dissolve_draw(d, w, h, hh, mm, frame, dissolve):
+    """The exit ramp's frames: the unconverted ink stays white under the
+    pouring field (draw_matrix overdraws it — drops cross the digits);
+    converted pixels fall as bright drops with a dimming 2-row trail."""
+    create_pen = d.create_pen
+    white = create_pen(255, 255, 255)
+    # the converted pixel: a full-brightness drop in the classic rain green
+    hr, hg, hb = MATRIX_TINTS[0]
+    head_pen = create_pen(hr, hg, hb)
+    # trail pens: the drop's two previous positions, dimmer with distance
+    dim1 = create_pen(hr * 55 // 100, hg * 55 // 100, hb * 55 // 100)
+    dim2 = create_pen(hr * 25 // 100, hg * 25 // 100, hb * 25 // 100)
+    for (x, y, s, stride) in _clock_ink(d, w, h, hh, mm):
+        if dissolve <= s:          # still part of the text: white ink
+            d.set_pen(white)
+            d.pixel(x, y)
+            continue
+        head = y + (dissolve - s) * stride
+        for back, pen in ((2, dim2), (1, dim1), (0, head_pen)):
+            yy = head - back * stride
+            if 0 <= yy < h:
+                d.set_pen(pen)
+                d.pixel(x, yy)
+
+
 def draw_rain_clock(d, w, h, hh, mm, blink, frame, fade=MATRIX_FADE_STEPS,
                     dissolve=0):
     """Clock rendered through the matrix rain (the mode shown while button
@@ -562,34 +650,17 @@ def draw_rain_clock(d, w, h, hh, mm, blink, frame, fade=MATRIX_FADE_STEPS,
     the overlay in (matrix mode's entry): 0 = bare rain, no digits;
     MATRIX_FADE_STEPS = the full overlay. Digit brightness rides the same
     fade, so the clock materializes out of the field instead of popping in.
-    dissolve phases it out (the exit): the dim box drops, the digits dim
-    to black and every lit digit pixel rains down as a shrinking grey
-    streak — redrawn via d.text at descending offsets, so the streaks are
-    pixel-exact to the digits and stay deterministic. Blink and the HH/MM
-    layout reuse draw_clock; same contract as the plain rain (frame tick
-    only)."""
+    dissolve phases it out (the exit, starting immediately): the dim box
+    lifts, the full-strength rain pours across the still-bright clock and
+    the ink converts to drops one pixel at a time (organic stagger) while
+    it falls off the bottom like the rest of the rain — no dedicated pour
+    step, the two happen together. Blink and the
+    HH/MM layout reuse draw_clock's math (via the embedded ink map); same
+    contract as the plain rain (frame tick only)."""
     clear(d, w, h)               # draw_matrix only paints the rain pixels
-    if dissolve > 0:             # exit ramp: the clock rains down
-        draw_matrix(d, w, h, frame)
-        if dissolve >= MATRIX_DISSOLVE_STEPS:
-            return
-        colon_adv = 3
-        tw = d.measure_text(hh, 1) + colon_adv + d.measure_text(mm, 1)
-        x = (w - tw) // 2
-        step = dissolve
-        # when the last streak falls off the bottom the digits are gone:
-        # base digits dim as the dissolve progresses, streak copies below
-        # are dimmer still, dimming with distance in the streak
-        bah = 255 * (MATRIX_DISSOLVE_STEPS - step) // MATRIX_DISSOLVE_STEPS
-        d.set_pen(d.create_pen(bah, bah, bah))
-        d.text(hh, x, TEXT_Y, scale=1)
-        mm_x = x + d.measure_text(hh, 1) + colon_adv
-        d.text(mm, mm_x, TEXT_Y, scale=1)
-        for i in range(1, step):
-            sh = bah * (step - i) // step
-            d.set_pen(d.create_pen(sh, sh, sh))
-            d.text(hh, x, TEXT_Y + i, scale=1)
-            d.text(mm, mm_x, TEXT_Y + i, scale=1)
+    if dissolve > 0:             # exit ramp: rain pours over, ink falls
+        _dissolve_draw(d, w, h, hh, mm, frame, dissolve)
+        draw_matrix(d, w, h, frame)   # the rain overdraws ink + exit drops
         return
     if fade <= 0:                # bare rain: no box, no digits
         draw_matrix(d, w, h, frame)
@@ -626,6 +697,8 @@ def draw_rain_clock(d, w, h, hh, mm, blink, frame, fade=MATRIX_FADE_STEPS,
 # rain-clock dim mask, reused across frames (see draw_rain_clock)
 _RC_MASK = None
 _RC_ZEROS = None
+# the exit ramp's ink map, cached per clock text (see _clock_ink)
+_INK_CACHE = None
 
 
 def draw_weather(d, w, h, code, temp_text, frame, is_day=1):

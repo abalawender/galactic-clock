@@ -368,6 +368,18 @@ class TestAnimations(unittest.TestCase):
         shots = self._with_presses((21.0,), "draw_matrix", 50.0)
         self.assertTrue(shots, "button press never started the rain")
 
+    def test_press_takes_over_the_rotation_immediately(self):
+        # a press mid-clock-slot ends the screen within a frame and the
+        # rain starts — the rest of that rotation (weather/hilo/co2) never
+        # plays; per-frame deadline polls in the show loops (rain_pending)
+        late = self._with_presses((21.0,), "draw_weather", 45.0)
+        early = self._with_presses((), "draw_weather", 45.0)
+        self.assertTrue(early, "control run: no weather screens at all")
+        self.assertLess(len(late or []), len(early) - 10,
+                        "the press did not cancel the rotation's remaining "
+                        "screens immediately (%d vs %d)" % (len(late or []),
+                                                            len(early)))
+
     def test_second_press_stops_rain_and_rotation_resumes(self):
         # press at 21 s (rain on), press again at 27 s (rain off): only a
         # short burst of rain, then the clock returns for full slots
@@ -561,45 +573,89 @@ class TestAnimations(unittest.TestCase):
         self.assertNotIn(render.WHITE, (px for row in gone for px in row),
                          "digits visible at fade 0")
 
-    def test_rain_clock_dissolves_into_falling_droplets(self):
-        # the exit ramp: dissolve>0 drops the dim box (rain full strength
-        # everywhere again) and the digits rain down — dimming digit copies
-        # trailing below, no white anywhere, nothing left at the last step
+    def test_exit_ink_matches_the_real_font(self):
+        # the embedded digit glyphs (render._DIGIT_GLYPHS) must be the same
+        # shapes Pimoroni's bitmap6 draws — the exit ramps them into drops,
+        # and a divergent copy would visibly snap the clock at the
+        # conversion boundary. First the raw glyph data, then the ink map's
+        # pixel positions against really drawn text.
+        for ch in "0123456789":
+            mine = {(col, row) for col in range(6) for row in range(6)
+                    if render._DIGIT_GLYPHS[ch][col] >> row & 1}
+            spec = simmod.font6_data.GLYPHS[ch]
+            real = {(col, row) for col in range(6) for row in range(6)
+                    if spec[col] >> row & 1}
+            self.assertEqual(mine, real, "digit %r bytes diverge from "
+                             "font6" % ch)
+            self.assertEqual(render._DIGIT_WIDTHS[ord(ch) - 48],
+                             simmod.font6_data.WIDTHS[ord(ch) - 32],
+                             "digit %r width diverges" % ch)
+        # the ink map must land exactly where d.text puts the digits
+        d = simmod.SimGraphics(W, H)
+        mapped = set(render._clock_ink(d, W, H, "23", "59"))
+        mhh = d.measure_text("23", 1)
+        base = (W - (mhh + 3 + d.measure_text("59", 1))) // 2
+        d.set_pen(d.create_pen(255, 255, 255))
+        d.text("23", base, render.TEXT_Y)
+        d.text("59", base + mhh + 3, render.TEXT_Y)
+        real = {(x, y) for y in range(H) for x in range(W)
+                if d.fb[y][x] == render.WHITE}
+        self.assertEqual({(x, y) for (x, y, _, _) in mapped}, real,
+                         "the ink map does not match the drawn clock")
+
+    def test_rain_clock_exit_pours_then_ink_falls_organically(self):
+        # the exit ramp: no dedicated pour phase — from the first step the
+        # field pours across the still-bright clock while the ink converts
+        # to drops AT STAGGERED STEPS — never all at once — each falling
+        # away at its own speed; the last step is
+        # pure bare rain (no mid-air cutoff). Crossing drops transiently
+        # cover ink pixels, so ink counts are sampled as the max over
+        # several frames — the max is the least-obscured count.
         last = frame(lambda d, ff: render.draw_rain_clock(
             d, W, H, "23", "59", False, ff,
             dissolve=render.MATRIX_DISSOLVE_STEPS), 10)
         bare = frame(lambda d, ff: render.draw_matrix(d, W, H, ff), 10)
         self.assertEqual(last, bare,
                          "the dissolved clock did not reduce to bare rain")
-        # the digit zone dims strictly with each step; trails of the same
-        # grey shades appear below it (rain pixels are green-dominant, so a
-        # neutral grey = digit/trail ink)
-        grey_max = {}
-        trailing = {}
-        for step in (1, 3, 6):
-            fb = frame(lambda d, ff: render.draw_rain_clock(
-                d, W, H, "23", "59", False, ff, dissolve=step), 10)
-            self.assertNotIn(render.WHITE,
-                             (px for row in fb for px in row),
-                             "bright digit left during dissolve")
-            gmax, trail = 0, []
-            for y in range(H):
-                for x in range(W):
-                    r, g, b = fb[y][x]
-                    if r == g == b and 0 < r <= 255:
-                        gmax = max(gmax, r)
-                        if y >= render.TEXT_Y + 2:
-                            trail.append((x, y))
-            grey_max[step] = gmax
-            trailing[step] = trail
-        self.assertGreater(grey_max[1], grey_max[3])
-        self.assertGreater(grey_max[3], grey_max[6])
-        self.assertGreater(trailing[3], [],
-                           "no droplet trails below the clock at step 3")
-        self.assertGreater(max(y for _, y in trailing[6]),
-                           max(y for _, y in trailing[3]),
-                           "trails do not fall further as the dissolve "
-                           "advances")
+        sim = simmod.SimGraphics(W, H)
+        ink = render._clock_ink(sim, W, H, "23", "59")
+        all_px = {(x, y) for (x, y, s, f) in ink}
+        self.assertGreater(len(all_px), 20, "ink map implausibly small")
+        max_white = {}
+        for step in (1, 2, 3, 4):
+            best = 0
+            for f in range(0, 90, 7):   # max over sampled frames
+                fb = frame(lambda d, ff: render.draw_rain_clock(
+                    d, W, H, "23", "59", False, ff, dissolve=step), f)
+                n = sum(1 for y in range(H) for x in range(W)
+                        if fb[y][x] == render.WHITE)
+                best = max(best, n)
+            max_white[step] = best
+        # immediate conversion, no dedicated pour phase: the very first
+        # exit step already shows converted pixels falling (whites below
+        # the full ink count), most of the clock still lit — with the
+        # coarse 4-step stagger roughly a quarter of the ink converts
+        # per step, each wave plainly visible
+        self.assertGreater(max_white[1], len(all_px) - 25,
+                           "too much ink lost at the start of the exit")
+        self.assertLess(max_white[1], len(all_px),
+                        "no pixel converted at the first exit step")
+        # organic stagger: the conversion waves through steps 1..3, never
+        # a single block drop
+        self.assertGreater(max_white[1] - max_white[2], 3,
+                           "the conversion is not spread over steps")
+        self.assertGreater(max_white[2] - max_white[3], 3,
+                           "the conversion is not spread over steps")
+        # stagger spans convert steps 0..3: past step 4 no ink is left
+        self.assertEqual(max_white[4], 0, "ink left after all conversions")
+        # and drops fall beside it: bright rain-green outside the ink too?
+        fb = frame(lambda d, ff: render.draw_rain_clock(
+            d, W, H, "23", "59", False, ff, dissolve=6), 10)
+        drops_anywhere = sum(1 for y in range(H) for x in range(W)
+                             if fb[y][x][1] > 120 and fb[y][x][0] < fb[y][x][1])
+        self.assertGreater(drops_anywhere, 0, "no rain at the exit at all")
+
+
 
 
 GOLDEN_WEATHER_RAIN_F0 = (
