@@ -23,6 +23,7 @@ All drawing lives in render.py (pure, board-independent) so it can also run in
 the host simulator: python3 sim/sim.py play --screen weather --code 61
 Deploy with scripts/deploy.sh (mpremote cp main.py + render.py :).
 """
+import gc
 import time
 
 import network
@@ -55,7 +56,9 @@ WIFI_RETRY_S = 60      # retry a failed/dropped wifi connect at most this often
 # on this board via GalacticUnicorn.SWITCH_*). Buttons are active-low.
 RAINFALL_BUTTON_PIN = GalacticUnicorn.SWITCH_A
 MATRIX_MODE_S = 120    # one press plays the rain this long, unless re-pressed
-BUTTON_DEBOUNCE_MS = 50  # bounce is ~ms; rain-loop polls are ~76 ms apart
+RAIN_FPS = 30          # target rain-frame rate (render+scanout decide the real one)
+RAIN_FRAME_US = 1000000 // RAIN_FPS
+BUTTON_DEBOUNCE_MS = 50  # bounce is ~ms; rain-loop polls are ~35 ms apart
 
 # SCD41 on the STEMMA QT / Qwiic connector
 I2C_SDA_PIN = 4
@@ -250,19 +253,60 @@ rain_button.irq(_rain_button_irq, Pin.IRQ_FALLING)
 
 def maybe_show_rain():
     """Slot boundary: while button A's rain deadline is in the future, run
-    full-screen matrix rain instead of the following data screens. A second
-    press zeroes the deadline (the loop notices within a frame) and the
-    timebox ends the mode on its own."""
+    full-screen matrix rain instead of the following data screens, the clock
+    poured over the field (render.draw_rain_clock) when the RTC is trusted.
+    The clock overlay phases in on entry and out on exit: one fade level
+    every other frame (~0.5 s each way, render.MATRIX_FADE_STEPS levels), so
+    the clock dissolves into the rain instead of popping. A second press
+    zeroes the deadline (the loop notices within a frame and fades out) and
+    the timebox ends the mode on its own. Paces to RAIN_FPS by absolute
+    ticks_us deadlines — render+scanout (~32 ms of the 33 ms budget) decide
+    whether a frame lands on time; when the loop falls behind it restarts
+    the schedule instead of burst-catching-up, so fps sags briefly rather
+    than speeds up."""
     global matrix_deadline, anim_frame
     if matrix_deadline <= time.time():
         return
     print("matrix rain: on (%d s or until A again)" % MATRIX_MODE_S)
-    while time.time() < matrix_deadline:
-        render.clear(d, W, H)
-        render.draw_matrix(d, W, H, anim_frame)
+    # Frame stability: once the pen memo saturates (~2100 entries, ~1 min of
+    # rain) the loop allocates nothing, and the frame time is stable; until
+    # then new pens and dict growth allocate, so collect once up front.
+    # gc.disable() was measured on the board to be a footgun — dict growth
+    # ran out of heap within seconds with no collection to reclaim.
+    gc.collect()
+    next_frame_us = time.ticks_us()
+    fade = 0
+    while True:
+        past_deadline = time.time() >= matrix_deadline
+        if past_deadline:
+            if fade == 0:        # rain over (a second press fades too)
+                break
+            if anim_frame % 2 == 0:
+                fade -= 1
+                if fade <= 0:
+                    break
+        elif rtc_trusted():
+            # rain pours over the clock: localtime() is UTC on this build —
+            # apply the tz offset ourselves (same path as show_clock); with
+            # the RTC untrusted the rain runs alone rather than show a wrong
+            # time (same rule as the rotation's clock-hiding)
+            if fade < render.MATRIX_FADE_STEPS and anim_frame % 2 == 0:
+                fade += 1
+            t = time.localtime(time.time() + tz.utc_offset(TZ, time.time()))
+            render.draw_rain_clock(d, W, H, "%02d" % t[3], "%02d" % t[4],
+                                   time.ticks_ms() % 1000 < 500, anim_frame,
+                                   fade=fade)
+        else:
+            render.clear(d, W, H)
+            render.draw_matrix(d, W, H, anim_frame)
         anim_frame += 1
         gu.update(d)
-        time.sleep(0.05)
+        next_frame_us = time.ticks_add(next_frame_us, RAIN_FRAME_US)
+        delay_us = time.ticks_diff(next_frame_us, time.ticks_us())
+        if delay_us > 0:
+            time.sleep(delay_us / 1000000.0)
+        else:
+            next_frame_us = time.ticks_us()
     print("matrix rain: off")
     matrix_deadline = 0.0
 

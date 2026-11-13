@@ -96,7 +96,9 @@ def check(gif_path=DEMO_GIF, seconds=DEMO_SECONDS, scale=DEMO_SCALE,
 # Keep in sync with the README matrix regenerate command below.
 MATRIX_GIF = os.path.join(REPO, "docs", "demo-matrix.gif")
 MATRIX_FRAMES = 60
-MATRIX_DELAY_MS = 50  # the on-board matrix tick (show_anim tick=0.05)
+MATRIX_DELAY_MS = 30  # GIF preview grid for the 1/30 s board tick (GIF
+                      # durations only store centiseconds, so 33.3 ms is not
+                      # representable; the frame CONTENT is tick-independent)
 MATRIX_SCALE = 8
 
 
