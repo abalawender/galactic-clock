@@ -182,6 +182,71 @@ def render_icons(R, entries, n):
     return out
 
 
+# rain-clock episode: the rain mode is only interesting across its
+# transitions (field pouring bare -> clock fading in -> steady -> press ->
+# ink crumbling to drops -> gone), so its demo screens render the whole
+# episode rather than one steady draw. Frame counts ride the render module's
+# own constants, with fallbacks so older render.py (no episode constants, or
+# a draw_rain_clock without the fade/dissolve parameters) still renders.
+RAINCLOCK_STEADY_FRAMES = 16
+RAINCLOCK_TAIL_FRAMES = 2
+
+
+def render_rainclock_episode(R):
+    """The full rain-clock episode as a frame list: one fade level every
+    other frame (the board's ~0.3 s entry), a steady stretch, then the exit
+    dissolve one step every other frame, ending as soon as the clock is
+    fully gone. Frame counts ride the render module's constants (with
+    positional-call fallbacks for older render.py), so demos stay in step
+    with what the board shows for hh:mm "21"/"34"."""
+    fade_steps = getattr(R, "MATRIX_FADE_STEPS", 0)
+    dissolve_steps = getattr(R, "MATRIX_DISSOLVE_STEPS", 0)
+    has_ramp = fade_steps > 0 or dissolve_steps > 0
+    frames = []
+
+    def episode_draw(d, f, kwargs=None):
+        if kwargs is None:
+            # ref predates the fade/dissolve parameters (or the mode itself)
+            R.draw_rain_clock(d, W, H, "21", "34", f % 2 == 0, f)
+        else:
+            R.draw_rain_clock(
+                d, W, H, "21", "34", f % 2 == 0, f, **kwargs)
+
+    STEADY = RAINCLOCK_STEADY_FRAMES
+    f = 0
+    for _ in range(fade_steps * 2):
+        d = SimGraphics(W, H)
+        R.clear(d, W, H)
+        episode_draw(d, f, dict(
+            fade=min(fade_steps, f // 2 + 1)))
+        f += 1
+        frames.append(d.fb)
+    for _ in range(STEADY):
+        d = SimGraphics(W, H)
+        R.clear(d, W, H)
+        episode_draw(d, f,
+                     dict(fade=fade_steps if has_ramp else None))
+        f += 1
+        frames.append(d.fb)
+    exit_step = 0
+    for _ in range(dissolve_steps * 2):
+        d = SimGraphics(W, H)
+        R.clear(d, W, H)
+        episode_draw(d, f, dict(
+            fade=fade_steps,
+            dissolve=exit_step // 2 + 1))
+        f += 1
+        exit_step += 1
+        frames.append(d.fb)
+    for _ in range(RAINCLOCK_TAIL_FRAMES if dissolve_steps else 0):
+        d = SimGraphics(W, H)
+        R.clear(d, W, H)
+        episode_draw(d, f, dict(fade=0))
+        f += 1
+        frames.append(d.fb)
+    return frames
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -210,6 +275,11 @@ def main():
 
     if args.screen == "icons":
         frames = render_icons(render, ICON_ENTRIES, args.frames)
+    elif args.screen == "rainclock":
+        # the whole mode: fade-in -> steady pour -> exit dissolve. The
+        # episode builder derives its lengths from the render constants,
+        # so --frames does not apply here.
+        frames = render_rainclock_episode(render)
     else:
         fn = make_screen_fn(args)
         frames = [render_frame(fn, f) for f in range(args.frames)]

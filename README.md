@@ -43,18 +43,22 @@ host sim from the real `main.py` — regenerate with
 `python3 sim/run_main.py --seconds 24 --delay 0.12 --gif docs/demo-rotation.gif`
 (needs Pillow; these GIFs are tracked, all other recordings stay uncommitted).
 
-![Matrix rain demo](docs/demo-matrix.gif)
+![Rain-clock demo](docs/demo-rainclock.gif)
 
-The matrix rain mode, `python3 sim/sim.py play --screen matrix --frames 60
---delay 0.03 --gif docs/demo-matrix.gif` (30 ms preview grid; the board paces
-the same frames at 1/30 s ≈ 33 ms); `sim/check_demo_gif.py` (CI) enforces
-that both GIFs match the code.
+The rain-clock mode as one press plays it: the bare field pours, the clock
+phases in over ~0.3 s, holds steady with drops crossing the bright digits,
+then the exit dissolves the ink into falling drops frame by frame.
+`python3 sim/sim.py play --screen rainclock --delay 0.12
+--gif docs/demo-rainclock.gif` renders the whole episode (lengths ride the
+render constants, so `--frames` doesn't apply); `sim/check_demo_gif.py` (CI)
+enforces that both GIFs match the code.
 
 ## Hardware & host setup
 
 - Pimoroni Galactic Unicorn (Pico W); optional SCD41 CO2 sensor (STEMMA QT, SDA=4/SCL=5)
 - Windows 11 host + WSL2 (Ubuntu-24.04) — GitHub: `abalawender/galactic-clock`
-- Board on host USB bus 2-2; usbipd: `usbipd.exe`; `mpremote` (apt install micropython-mpremote)
+- Board shared with the WSL side over USB via usbipd: `usbipd.exe`;
+  `mpremote` (apt install micropython-mpremote)
 - Pillow — only needed for `--gif` output in the sim (everything else is stdlib)
 - Firmware: MicroPython v1.29.0 board build `pico_w_galactic-v1.29.0-micropython.uf2`
   from https://github.com/pimoroni/unicorn/releases/tag/v1.29.0
@@ -63,10 +67,12 @@ that both GIFs match the code.
 ## Connect
 
 ```
-# once, as admin on Windows:
-usbipd bind --busid 2-2
+# find the board's bus id (env-specific; changes with the port):
+usbipd list                           # e.g. 2-4  Pico W (pico_w_galactic)
+# once, as admin on Windows (bus id from the list):
+usbipd bind --busid <busid>
 # from WSL:
-usbipd.exe attach --wsl --busid 2-2   # -> /dev/ttyACM0
+usbipd.exe attach --wsl --busid <busid>   # -> /dev/ttyACM0
 mpremote exec "import os; print(os.uname().version)"
 ```
 

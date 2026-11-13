@@ -89,51 +89,40 @@ def check(gif_path=DEMO_GIF, seconds=DEMO_SECONDS, scale=DEMO_SCALE,
           delay_ms=DEMO_DELAY_MS):
     """Render the demos with the current code and compare against the GIFs."""
     problems = compare(run_main.run_current(seconds), gif_path, scale, delay_ms)
-    problems += compare_matrix_gif()
+    problems += compare_rainclock_gif()
     return problems
 
 
-# Keep in sync with the README matrix regenerate command below.
-MATRIX_GIF = os.path.join(REPO, "docs", "demo-matrix.gif")
-MATRIX_FRAMES = 60
-MATRIX_DELAY_MS = 30  # GIF preview grid for the 1/30 s board tick (GIF
-                      # durations only store centiseconds, so 33.3 ms is not
-                      # representable; the frame CONTENT is tick-independent)
-MATRIX_SCALE = 8
 
 
-def matrix_frames():
-    """The exact frames the tracked docs/demo-matrix.gif must contain."""
+# Keep in sync with the README rain-clock regenerate command below.
+RAINCLOCK_GIF = os.path.join(REPO, "docs", "demo-rainclock.gif")
+RAINCLOCK_DELAY_MS = 120
+RAINCLOCK_SCALE = 8
+
+
+def compare_rainclock_gif():
+    """docs/demo-rainclock.gif check: frame count, size, tempo, pixels.
+    The episode builder (sim.render_rainclock_episode) pins the exact
+    frames — one fade level and one dissolve step per two 120 ms frames —
+    so the tracked GIF must start bare, fade the clock in, hold it steady
+    over the pouring field, and end bare the moment the ink is gone."""
     import sim as simmod  # noqa: E402  (run_main import above set up sys.path)
-    out = []
-    for f in range(MATRIX_FRAMES):
-        d = simmod.SimGraphics(W, H)
-        render.clear(d, W, H)
-        render.draw_matrix(d, W, H, f)
-        out.append(d.fb)
-    return out
-
-
-def compare_matrix_gif():
-    """docs/demo-matrix.gif check: frame count, size, tempo, pixels. Matrix
-    frames always differ from each other (the rain never stops), so a
-    straightforward one-to-one comparison needs no delay expansion."""
-
-    if not os.path.exists(MATRIX_GIF):
-        return ["%s does not exist" % MATRIX_GIF]
-    got = gif_frames(MATRIX_GIF)
-    expected = [(fb_to_image(fb, MATRIX_SCALE).tobytes(),
-                 (W * MATRIX_SCALE, H * MATRIX_SCALE))
-                for fb in matrix_frames()]
+    if not os.path.exists(RAINCLOCK_GIF):
+        return ["%s does not exist" % RAINCLOCK_GIF]
+    got = gif_frames(RAINCLOCK_GIF)
+    expected = [(fb_to_image(fb, RAINCLOCK_SCALE).tobytes(),
+                 (W * RAINCLOCK_SCALE, H * RAINCLOCK_SCALE))
+                for fb in simmod.render_rainclock_episode(render)]
     problems = []
     if len(got) != len(expected):
-        problems.append("matrix gif: %d frames, code renders %d"
+        problems.append("rainclock gif: %d frames, code renders %d"
                         % (len(got), len(expected)))
     for i, ((px, size, dur), (epx, esize)) in enumerate(zip(got, expected)):
         if size != esize:
-            problems.append("matrix gif frame %d size %s" % (i, (size, esize)))
+            problems.append("rainclock gif frame %d size %s" % (i, (size, esize)))
         elif px != epx:
-            problems.append("matrix gif frame %d pixels differ" % i)
+            problems.append("rainclock gif frame %d pixels differ" % i)
     return problems
 
 
@@ -146,11 +135,11 @@ def main():
         print("regenerate with: python3 sim/run_main.py --seconds %g"
               " --delay %g --gif docs/demo-rotation.gif"
               % (DEMO_SECONDS, DEMO_DELAY_MS / 1000.0))
-        print("            and: python3 sim/sim.py play --screen matrix"
-              " --frames %d --delay %g --gif docs/demo-matrix.gif"
-              % (MATRIX_FRAMES, MATRIX_DELAY_MS / 1000.0))
+        print("            and: python3 sim/sim.py play --screen rainclock"
+              " --delay %g --gif docs/demo-rainclock.gif"
+              % (RAINCLOCK_DELAY_MS / 1000.0))
         return 1
-    print("OK: docs/demo-rotation.gif + docs/demo-matrix.gif match the"
+    print("OK: docs/demo-rotation.gif + docs/demo-rainclock.gif match the"
           " current code")
     return 0
 
