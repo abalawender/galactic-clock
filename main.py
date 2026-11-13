@@ -169,7 +169,10 @@ def show_weather(wx, seconds):
     is_day = wx["current"].get("is_day", 1)
     end = time.time() + seconds
     frame = 0
-    while time.time() < end:
+    # every show loop polls the button-A deadline (see rain_pending): a
+    # press mid-rotation ends this screen within a frame and the rain
+    # starts right away instead of at the next slot boundary
+    while time.time() < end and not rain_pending():
         render.clear(d, W, H)
         # frame must advance by exactly 1 per shown frame: time.time() is int
         # seconds on this build, so int(time.time()*3) jumps 0,3,6,9... and
@@ -182,7 +185,7 @@ def show_weather(wx, seconds):
 
 def show_clock(seconds):
     end = time.time() + seconds
-    while time.time() < end:
+    while time.time() < end and not rain_pending():
         # localtime() is UTC on this build — apply the TZ offset ourselves
         t = time.localtime(time.time() + tz.utc_offset(TZ, time.time()))
         # 1 Hz blink from ticks_ms (time.time() is int on this build)
@@ -197,7 +200,7 @@ def show_hilo(wx, seconds):
     hi = "%d" % round(wx["daily"]["temperature_2m_max"][0])
     lo = "%d" % round(wx["daily"]["temperature_2m_min"][0])
     end = time.time() + seconds
-    while time.time() < end:
+    while time.time() < end and not rain_pending():
         render.clear(d, W, H)
         render.draw_hilo(d, W, H, hi, lo)
         gu.update(d)
@@ -207,7 +210,7 @@ def show_hilo(wx, seconds):
 def show_co2(ppm, seconds, alarm=False):
     end = time.time() + seconds
     first = True
-    while time.time() < end:
+    while time.time() < end and not rain_pending():
         render.clear(d, W, H)
         render.draw_co2(d, W, H, ppm)
         gu.update(d)
@@ -248,17 +251,30 @@ def _rain_button_irq(pin):
         matrix_deadline = time.time() + MATRIX_MODE_S
 
 
+def rain_pending():
+    """True while button A's rain deadline is in the future — polled per
+    frame by every show_* loop so a press mid-rotation ends the screen
+    within a frame and the rain takes over immediately (the check used to
+    live only at the slot boundaries, which delayed a mid-rotation press
+    by up to ~15 s)."""
+    return matrix_deadline > time.time()
+
+
 rain_button.irq(_rain_button_irq, Pin.IRQ_FALLING)
 
 
 def maybe_show_rain():
-    """Slot boundary: while button A's rain deadline is in the future, run
-    full-screen matrix rain instead of the following data screens, the clock
+    """While button A's rain deadline is in the future, run full-screen
+    matrix rain instead of the following data screens, the clock
     poured over the field (render.draw_rain_clock) when the RTC is trusted.
-    The clock phases in on entry (one fade level every 4th frame, ~0.5 s)
-    and rains down on exit (draw_rain_clock's dissolve, one step every other
-    frame). A second press zeroes the deadline (the loop notices within a
-    frame and dissolves) and the timebox ends the mode on its own. Paces to
+    The show loops bail on the deadline per frame (rain_pending), so this
+    starts within a frame of the press, not at the next slot boundary.
+    The clock phases in on entry (one fade level every other frame, ~0.3 s)
+    and dissolves out on exit the moment it begins (draw_rain_clock's exit:
+    no separate pour phase — the field pours over while the ink converts
+    pixel by pixel, ~1.3 s to the last drop off screen). A second press
+    zeroes the deadline (the loop notices within a frame and dissolves) and
+    the timebox ends the mode on its own. Paces to
     RAIN_FPS by absolute ticks_us deadlines — render+scanout (~32 ms of the
     33 ms budget) decide whether a frame lands on time; when the loop falls
     behind it restarts the schedule instead of burst-catching-up, so fps
@@ -283,14 +299,14 @@ def maybe_show_rain():
                     dissolve >= render.MATRIX_DISSOLVE_STEPS:
                 break
             if anim_frame % 2 == 0:
-                dissolve += 1    # one trail row every other frame (~0.6 s)
+                dissolve += 1    # the whole exit: ~20 steps = ~1.3 s
         elif rtc_trusted():
-            # 4 dither levels, one every 4th frame: ~0.5 s ramp. A step
+            # 4 dither levels, one every other frame: a ~0.3 s ramp. A step
             # allocates nothing (the Bayer dither just lights more of the
             # existing dim pens — see render._BAYER4), so the ramp runs at
             # full fps instead of stuttering; the mode entry's collect
             # covers the only real burst (a level's first masked pixels)
-            if fade < render.MATRIX_FADE_STEPS and anim_frame % 4 == 0:
+            if fade < render.MATRIX_FADE_STEPS and anim_frame % 2 == 0:
                 fade += 1
         try:
             if rtc_trusted():
@@ -380,7 +396,7 @@ def log_sys():
 
 def show_text(msg, seconds):
     end = time.time() + seconds
-    while time.time() < end:
+    while time.time() < end and not rain_pending():
         render.clear(d, W, H)
         render.draw_message(d, W, H, msg)
         gu.update(d)
@@ -454,7 +470,8 @@ def main():
                 show_co2(co2, 5, alarm=True)
             # telemetry ties to the data screens; the rain below doesn't log
             log_sys()
-            # a press mid-rotation takes over at the next slot boundary
+            # a press mid-rotation makes every show loop bail within a
+            # frame (see rain_pending), so this runs almost immediately
             maybe_show_rain()
         except Exception as e:
             print("loop error:", e)
