@@ -14,12 +14,26 @@ MicroPython. A weather clock that rotates four screens on the matrix:
 - **CO2** — ppm from an optional SCD41 sensor on the STEMMA QT connector,
   color-coded green/amber/red by indoor air quality
 
+Buttons: **A** toggles the **matrix rain** mode — fragments of green code
+green code rain, one anti-aliased drop per column (subpixel motion, gradual
+brightness between rows) with a bright head and fading trail, in three
+speed/brightness tiers (slow+dim "far", mid, fast+bright "near"). One press
+plays it full-screen for two minutes (a second press stops it early), then
+the regular rotation resumes. The rain keeps a persistent frame tick across
+runs, so it always continues where it left off.
+
 ![Display loop demo](docs/demo-rotation.gif)
 
-The full rotation (clock → animated weather → hi/lo → CO2), rendered by the
+The regular rotation (clock → animated weather → hi/lo → CO2), rendered by the
 host sim from the real `main.py` — regenerate with
-`python3 sim/run_main.py --seconds 18 --delay 0.12 --gif docs/demo-rotation.gif`
-(needs Pillow; this one GIF is tracked, all other recordings stay uncommitted).
+`python3 sim/run_main.py --seconds 24 --delay 0.12 --gif docs/demo-rotation.gif`
+(needs Pillow; these GIFs are tracked, all other recordings stay uncommitted).
+
+![Matrix rain demo](docs/demo-matrix.gif)
+
+The matrix rain mode, `python3 sim/sim.py play --screen matrix --frames 60
+--delay 0.05 --gif docs/demo-matrix.gif`; `sim/check_demo_gif.py` (CI) enforces
+that both GIFs match the code.
 
 ## Hardware & host setup
 
@@ -82,6 +96,7 @@ python3 sim/sim.py play   --screen weather --code 61 --temp 21   # animate in te
 python3 sim/sim.py play   --screen weather --code 0 --night      # moon + stars
 python3 sim/sim.py play   --screen icons --frames 8              # contact sheet: all icons
 python3 sim/sim.py play   --screen hilo --hi 25 --lo 18
+python3 sim/sim.py play   --screen matrix --frames 60         # code rain
 ```
 
 See it in motion — render any screen, or the whole display loop of the real
@@ -90,7 +105,8 @@ See it in motion — render any screen, or the whole display loop of the real
 tracked one is the README demo above):
 
 ```
-python3 sim/run_main.py --seconds 18 --gif /tmp/rotation.gif   # clock -> weather -> hi/lo -> CO2
+python3 sim/run_main.py --seconds 24 --gif /tmp/rotation.gif   # clock -> weather -> hi/lo -> CO2
+python3 sim/sim.py play --screen matrix --frames 60 --gif /tmp/matrix.gif
 python3 sim/sim.py play --screen icons --frames 8 --gif /tmp/icons.gif
 python3 sim/sim.py play --screen weather --code 61 --temp 21 --frames 12 --gif /tmp/rain.gif
 ```

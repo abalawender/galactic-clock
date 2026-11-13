@@ -4,7 +4,11 @@ Connects to WiFi (credentials in /secrets.py, not committed), syncs the RTC
 via NTP (clock on screen), fetches the forecast from open-meteo (no API key
 needed), reads a local SCD41 CO2 sensor over I2C (breakout_scd41 is frozen
 into Pimoroni's MicroPython), and rotates the screens on the 53x11 matrix:
-clock, weather icon + temperature, high/low, CO2 ppm. Board telemetry
+clock, weather icon + temperature, high/low, CO2 ppm. Button A toggles the
+matrix-rain animation mode (fragments of green code falling full-screen),
+which then runs for two minutes (a second press stops it early) before the
+regular rotation resumes. The rain keeps a persistent frame tick across
+runs. Board telemetry
 (ambient light, die temperature) is logged over UART each rotation, and
 VSYS once at boot with the radio powered down (GP29 is the Pico W radio's
 SPI CS, so it is only measurable with WLAN off). A boot/loading screen is
@@ -25,7 +29,7 @@ import network
 import ntptime
 import urequests
 import ujson
-from machine import ADC
+from machine import ADC, Pin
 from breakout_scd41 import BreakoutSCD41  # frozen into Pimoroni's MicroPython
 from pimoroni_i2c import PimoroniI2C
 
@@ -45,6 +49,13 @@ WX_URL = "https://api.open-meteo.com/v1/forecast"
 REFRESH_S = 600
 RTC_TRUST_YEAR = 2026  # an unsynced RP2040 RTC boots at 2021-01-01; a synced one is >= 2026
 WIFI_RETRY_S = 60      # retry a failed/dropped wifi connect at most this often
+
+# Button A toggles the matrix rain. The pin comes from the frozen galactic
+# class — the board's buttons are NOT GP6/7/8/9 (A=0, B=1, C=3, D=6; verified
+# on this board via GalacticUnicorn.SWITCH_*). Buttons are active-low.
+RAINFALL_BUTTON_PIN = GalacticUnicorn.SWITCH_A
+MATRIX_MODE_S = 120    # one press plays the rain this long, unless re-pressed
+BUTTON_DEBOUNCE_MS = 50  # bounce is ~ms; rain-loop polls are ~76 ms apart
 
 # SCD41 on the STEMMA QT / Qwiic connector
 I2C_SDA_PIN = 4
@@ -203,6 +214,59 @@ def show_co2(ppm, seconds, alarm=False):
         time.sleep(0.2)
 
 
+# persistent tick of the animation mode: the rain keeps falling across runs
+# instead of restarting from a blank matrix
+anim_frame = 0
+
+
+# Button A toggles the matrix rain via a pin IRQ so no press is ever missed
+# (an edge can land anywhere between screen frames). The handler only runs
+# the debounced edge -> deadline logic — no drawing, formatting or printing
+# inside the hard IRQ; the main loop watches the deadline.
+rain_button = Pin(RAINFALL_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
+matrix_deadline = 0.0        # time.time() epoch when the rain ends; 0 = off
+btn_last_press_ms = None     # ticks_ms() of the last accepted press (None:
+                             # no accepted edge yet — ticks_ms wraps, so a
+                             # literal 0 would poison the first diffs)
+
+
+def _rain_button_irq(pin):
+    """Take a debounced fresh press and toggle: deadline unset -> set it to
+    now + MATRIX_MODE_S (rain on); deadline active -> zero it (rain off)."""
+    global matrix_deadline, btn_last_press_ms
+    now_ms = time.ticks_ms()
+    if btn_last_press_ms is not None and \
+            time.ticks_diff(now_ms, btn_last_press_ms) < BUTTON_DEBOUNCE_MS:
+        return  # bounce inside the debounce window: ignore
+    btn_last_press_ms = now_ms
+    if matrix_deadline > time.time():
+        matrix_deadline = 0.0
+    else:
+        matrix_deadline = time.time() + MATRIX_MODE_S
+
+
+rain_button.irq(_rain_button_irq, Pin.IRQ_FALLING)
+
+
+def maybe_show_rain():
+    """Slot boundary: while button A's rain deadline is in the future, run
+    full-screen matrix rain instead of the following data screens. A second
+    press zeroes the deadline (the loop notices within a frame) and the
+    timebox ends the mode on its own."""
+    global matrix_deadline, anim_frame
+    if matrix_deadline <= time.time():
+        return
+    print("matrix rain: on (%d s or until A again)" % MATRIX_MODE_S)
+    while time.time() < matrix_deadline:
+        render.clear(d, W, H)
+        render.draw_matrix(d, W, H, anim_frame)
+        anim_frame += 1
+        gu.update(d)
+        time.sleep(0.05)
+    print("matrix rain: off")
+    matrix_deadline = 0.0
+
+
 # the audible alarm fires at render.CO2_RED_PPM — the same level that turns
 # the CO2 font red. SCD41 accuracy is ±(40 ppm + 5%), so the threshold is soft.
 ALS_ALARM_MIN = 20     # gu.light() raw 0..4095; dark room established < 20, office lights 20-40
@@ -318,17 +382,22 @@ def main():
                 # never NTP-synced and RTC still < 2026 (fresh boot): showing
                 # the clock would display a wrong time — message instead
                 show_text("no ntp", 5)
+            maybe_show_rain()
             if wx is not None:
                 show_weather(wx, 5)
                 show_hilo(wx, 5)
             else:
                 show_text("no weather", 5)
+            maybe_show_rain()
             if sensor is not None and sensor.ready():
                 co2, _temp, _rh = sensor.measure()
                 # alarm fires inside show_co2 right after the first frame,
                 # so the beep overlaps the screen instead of preceding it
                 show_co2(co2, 5, alarm=True)
+            # telemetry ties to the data screens; the rain below doesn't log
             log_sys()
+            # a press mid-rotation takes over at the next slot boundary
+            maybe_show_rain()
         except Exception as e:
             print("loop error:", e)
             show_text("err", 5)

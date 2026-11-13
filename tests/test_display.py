@@ -126,6 +126,172 @@ class TestLayout(unittest.TestCase):
 
 # Golden ASCII dumps — exact rendered output. Update deliberately when the
 # layout intentionally changes.
+class TestAnimations(unittest.TestCase):
+    """Full-matrix digital-rain fun slot: the matrix code rain."""
+
+    # -- matrix rain -------------------------------------------------------
+
+    def _heads(self, frames):
+        """(col -> list of head y per frame) for draw_matrix; None = in gap.
+        The head is the brightest pixel of the column (alpha fades upward
+        behind it, so the argmax is the head row)."""
+        out = {}
+        for f in frames:
+            fb = frame(lambda d, f: render.draw_matrix(d, W, H, f), f)
+            for x in range(W):
+                ls = [fb[y][x][1] for y in range(H)]  # g channel dominates
+                ys = [y for y in range(H) if ls[y]]
+                out.setdefault(x, []).append(
+                    max(ys, key=lambda y: ls[y]) if ys else None)
+        return out
+
+    def test_matrix_is_green_rain(self):
+        fb = frame(lambda d, f: render.draw_matrix(d, W, H, f), 7)
+        lit = {p for row in fb for p in row if p != (0, 0, 0)}
+        self.assertTrue(lit, "matrix rain drew nothing")
+        for (r, g, b) in lit:
+            # pale bright heads, green trails: green always dominates
+            self.assertLess(r, g, "rain pixel not green: %s" % ((r, g, b),))
+            self.assertLess(b, g, "rain pixel not green: %s" % ((r, g, b),))
+
+    def test_matrix_is_subpixel_smooth(self):
+        # anti-aliasing: a head must not be a full-brightness dot teleporting
+        # row to row — the drop's fractional position must show up as partial
+        # brightness on two adjacent rows (the transition), and tier phases
+        # must advance a non-integer number of rows per tick
+        mid = 26  # a column with tier (2, 3, ...)
+        prof = []
+        for f in range(3):
+            fb = frame(lambda d, f: render.draw_matrix(d, W, H, f), f)
+            prof.append([fb[y][mid][1] for y in range(H)])
+        # the head pixel must sometimes sit between two rows: some frame has
+        # its max pixel less than the per-tier max alpha (partial head)
+        heads = [max(p) for p in prof if max(p)]
+        self.assertTrue(any(h < 250 for h in heads),
+                        "heads never anti-aliased: %s" % (heads,))
+        self.assertEqual(render.MATRIX_TIERS[0][0:2], (1, 3))  # slow < 1 row/tick
+
+    def test_matrix_tiers_differ_in_speed_and_brightness(self):
+        # every tier must actually be configured, with visibly different
+        # speeds (1, 2, 4 rows per 3 ticks) and strictly increasing brightness
+        self.assertEqual(len(render.MATRIX_TIERS), 3)
+        for (rows, per, bright) in render.MATRIX_TIERS:
+            self.assertEqual(per, 3)  # denominator 3 -> phases don't step
+        self.assertEqual([t[0] for t in render.MATRIX_TIERS], [1, 2, 4])
+        lums = [(255 * t[2]) // 100 for t in render.MATRIX_TIERS]
+        self.assertEqual(lums, sorted(lums), "tiers not dark -> bright")
+
+    def _runs(self, col_heads):
+        """col -> list of runs, each a list of (frame, head y) with the head
+        continuously visible; a top respawn (upward jump > 2) starts a new
+        run so wrap deltas never mask downward motion."""
+        out = {}
+        for x, seq in col_heads.items():
+            out_runs, cur = [], []
+            for i, y in enumerate(seq):
+                if y is None or (cur and y < cur[-1][1] - 2):
+                    if cur:
+                        out_runs.append(cur)
+                    cur = [] if y is None else [(i, y)]
+                else:
+                    cur.append((i, y))
+            if cur:
+                out_runs.append(cur)
+            out[x] = out_runs
+        return out
+
+    def test_matrix_falls_down_at_constant_column_speed(self):
+        runs = self._runs(self._heads(range(30)))
+        self.assertTrue(runs, "no heads found at all")
+        for x, col_runs in runs.items():
+            for run in col_runs:
+                for (i0, y0), (i1, y1) in zip(run, run[1:]):
+                    dy = y1 - y0
+                    self.assertGreaterEqual(dy, 0, "col %d moved up" % x)
+                    self.assertLessEqual(dy, 2, "col %d jumped %d rows" % (x, dy))
+
+    def test_matrix_speeds_vary_between_columns(self):
+        # exact speeds from the exposed subpixel state: the three tiers move
+        # 1, 2, 4 rows per 3 ticks (mod the wrap), all of them present
+        speeds = set()
+        for x in range(W):
+            rows = render.MATRIX_TIERS[render._tier_of(x)][0]
+            c0, _, _ = render.matrix_col(x, H, 100)
+            c3, _, _ = render.matrix_col(x, H, 103)
+            adv = (c3 - c0) % ((H + 4 + (x * 3) % 6) * render.SUB)
+            self.assertEqual(adv, (rows * 3 * render.SUB)
+                             // render.MATRIX_TIERS[render._tier_of(x)][1]
+                             % ((H + 4 + (x * 3) % 6) * render.SUB),
+                             "col %d advances %s per 3 ticks" % (x, adv))
+            speeds.add(rows)
+        self.assertEqual(speeds, {1, 2, 4},
+                         "columns do not cover all three tier speeds")
+
+    def test_matrix_motion_is_subpixel_continuous(self):
+        # every tier's per-tick phase increment is NOT a whole row (no exact
+        # row-multiples), so anti-aliased heads glide instead of teleporting
+        for x in range(W):
+            for f in range(6):
+                c0, _, _ = render.matrix_col(x, H, f)
+                c1, _, _ = render.matrix_col(x, H, f + 1)
+                step = (c1 - c0) % ((H + 4 + (x * 3) % 6) * render.SUB)
+                self.assertNotEqual(step % render.SUB, 0,
+                                    "col %d steps a whole row at f=%d" % (x, f))
+
+    def test_matrix_columns_are_staggered(self):
+        seqs = self._heads(range(3))
+        first_y = {seq[0] for seq in seqs.values() if seq[0] is not None}
+        self.assertGreater(len(first_y), 1, "all heads share one phase")
+
+    def test_matrix_covers_the_board(self):
+        cols = set()
+        for f in range(24):
+            fb = frame(lambda d, f: render.draw_matrix(d, W, H, f), f)
+            for x in range(W):
+                if any(fb[y][x] != (0, 0, 0) for y in range(H)):
+                    cols.add(x)
+        self.assertEqual(cols, set(range(W)), "matrix rain misses columns")
+
+    # -- rotation integration ----------------------------------------------
+    # The rain is user-toggled by button A's IRQ handler (main.py); presses
+    # are injected at virtual epochs relative to the mocked NTP sync.
+
+    def _with_presses(self, offsets, draw_func, seconds):
+        press_at = tuple(run_main.SYNCED_EPOCH + off for off in offsets)
+        run_main.FakePin.press_at = press_at
+        try:
+            return run_main.run_screen_current(draw_func, seconds)
+        finally:
+            run_main.FakePin.press_at = ()
+
+    def test_matrix_hidden_until_button_pressed(self):
+        shots = self._with_presses((), "draw_matrix", 26.0)
+        self.assertFalse(shots, "matrix rain played with no button press")
+
+    def test_matrix_plays_when_button_pressed(self):
+        # a press mid-rotation takes over at the next slot boundary
+        shots = self._with_presses((21.0,), "draw_matrix", 50.0)
+        self.assertTrue(shots, "button press never started the rain")
+
+    def test_second_press_stops_rain_and_rotation_resumes(self):
+        # press at 21 s (rain on), press again at 27 s (rain off): only a
+        # short burst of rain, then the clock returns for full slots
+        rain = self._with_presses((21.0, 27.0), "draw_matrix", 60.0)
+        clocks = self._with_presses((21.0, 27.0), "draw_clock", 60.0)
+        self.assertTrue(rain, "the first press never started the rain")
+        self.assertGreater(len(clocks), 26,
+                           "rotation never resumed after the second press")
+
+    def test_rain_timebox_returns_to_rotation(self):
+        # one press at 21 s: rain until 141 s, then the rotation rotates on
+        # (two or more clock fills become visible over the run)
+        rain = self._with_presses((21.0,), "draw_matrix", 180.0)
+        clocks = self._with_presses((21.0,), "draw_clock", 180.0)
+        self.assertTrue(rain, "the press never started the rain")
+        self.assertGreater(len(clocks), 26,
+                           "rotation never resumed after the rain timebox")
+
+
 GOLDEN_WEATHER_RAIN_F0 = (
     '                                                     \n'
     '               +++  @@                               \n'

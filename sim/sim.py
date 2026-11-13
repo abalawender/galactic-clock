@@ -16,14 +16,15 @@ Usage:
                                  # on the host; on the board: skills/display --icons)
     python3 sim/sim.py play   --screen clock --frames 8
     python3 sim/sim.py play   --screen hilo --hi 25 --lo 18
+    python3 sim/sim.py play   --screen matrix --frames 24
     python3 sim/sim.py play   --screen clock --frames 30 --gif /tmp/clock.gif
                                  # animated GIF (needs Pillow); generate for PRs,
                                  # never commit (gitignored)
     python3 sim/before_after.py --ref main --out /tmp/pr
                                  # before/after/compare GIFs per screen, from a git ref
 
-Screens: weather (icon + temp), clock, hilo, message. --frames N renders N
-animation ticks (frame 0..N-1); --delay sets playback seconds per frame.
+Screens: weather (icon + temp), clock, hilo, matrix, message. --frames N
+renders N animation ticks (frame 0..N-1); --delay sets playback seconds per frame.
 """
 import argparse
 import inspect
@@ -46,18 +47,24 @@ class SimGraphics:
     def __init__(self, w=W, h=H):
         self.w, self.h = w, h
         self.fb = [[(0, 0, 0)] * w for _ in range(h)]
-        self.pen = (0, 0, 0)
+        self.pen = 0               # opaque handle, like real PicoGraphics
 
     # -- PicoGraphics-compatible API -----------------------------------------
+    # Real PicoGraphics hands back opaque int pen handles from one display-
+    # wide handle space; the sim keeps the table module-level so handles stay
+    # valid across instances (render.py's pen memo outlives a single frame).
+    _pens = [(0, 0, 0)]
+
     def create_pen(self, r, g, b):
-        return (r, g, b)
+        SimGraphics._pens.append((r, g, b))
+        return len(SimGraphics._pens) - 1
 
     def set_pen(self, p):
         self.pen = p
 
     def pixel(self, x, y):
         if 0 <= x < self.w and 0 <= y < self.h:
-            self.fb[y][x] = self.pen
+            self.fb[y][x] = SimGraphics._pens[self.pen]
 
     def rectangle(self, x, y, w, h):
         for yy in range(y, y + h):
@@ -130,6 +137,8 @@ def make_screen_fn(args):
             d, W, H, args.label or BOOT_STAGES[min(f // 4, len(BOOT_STAGES) - 1)], f)
     if args.screen == "message":
         return lambda d, f: render.draw_message(d, W, H, args.message)
+    if args.screen == "matrix":
+        return lambda d, f: render.draw_matrix(d, W, H, f)
     raise SystemExit("unknown screen: %s" % args.screen)
 
 
@@ -176,7 +185,8 @@ def main():
                     help="play: animate in terminal; print: plain ASCII frames "
                          "to stdout (no escape codes)")
     ap.add_argument("--screen", default="weather",
-                    choices=["weather", "clock", "hilo", "co2", "boot", "message", "icons"])
+                    choices=["weather", "clock", "hilo", "co2", "boot", "message",
+                             "matrix", "icons"])
     ap.add_argument("--code", type=int, default=61, help="WMO weather code (weather screen)")
     ap.add_argument("--temp", type=int, default=21, help="current temperature C")
     ap.add_argument("--night", action="store_true", help="weather screen: night (moon)")
