@@ -19,10 +19,10 @@ done
 if [[ ! -e /dev/ttyACM0 ]]; then
   if [[ "$NO_ATTACH" == 1 ]]; then
     echo "error: /dev/ttyACM0 not found and --no-attach given." >&2
-    echo "  run: scripts/attach.sh     # usbipd.exe attach --wsl --busid 2-2" >&2
+    echo "  run: scripts/attach.sh [busid]   # busid auto-detected if omitted" >&2
     exit 1
   fi
-  echo "board not attached (/dev/ttyACM0 missing) — running scripts/attach.sh" >&2
+  echo "board not attached (/dev/ttyACM0 missing) - running scripts/attach.sh" >&2
   "$(dirname "$0")/attach.sh" || true
 fi
 if [[ ! -e /dev/ttyACM0 ]]; then

@@ -17,6 +17,7 @@ Keep a local copy in `firmware/` (gitignored).
   copying from Windows itself (PowerShell `Copy-Item ... E:\`) lands immediately.
 - Ejecting `E:` on Windows unmounts the volume but does NOT reboot the board out
   of bootloader mode.
-- `usbipd bind --busid 2-2` once as admin on Windows is required before attach.
+- `usbipd bind --busid <busid>` once as admin on Windows is required before
+  attach (busid comes from `usbipd list`; it depends on the USB port used).
 - dd-to-partition via usbipd (`of=/dev/sdd1`) needs disk group/sudo — not used;
   `picotool` on the Windows host is an alternative.
