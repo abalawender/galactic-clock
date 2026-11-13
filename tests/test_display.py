@@ -146,38 +146,86 @@ class TestAnimations(unittest.TestCase):
         return out
 
     def test_matrix_is_green_rain(self):
-        fb = frame(lambda d, f: render.draw_matrix(d, W, H, f), 7)
-        lit = {p for row in fb for p in row if p != (0, 0, 0)}
+        lit = set()
+        strong = 0
+        for f in range(40):
+            fb = frame(lambda d, f: render.draw_matrix(d, W, H, f), f)
+            for p, _x in ((p, x) for row in fb for x, p in enumerate(row)
+                          if p != (0, 0, 0)):
+                lit.add(p)
         self.assertTrue(lit, "matrix rain drew nothing")
         for (r, g, b) in lit:
-            # pale bright heads, green trails: green always dominates
-            self.assertLess(r, g, "rain pixel not green: %s" % ((r, g, b),))
-            self.assertLess(b, g, "rain pixel not green: %s" % ((r, g, b),))
+            # every tint in MATRIX_TINTS is green-dominant once the fade
+            # multiplies all channels by the same alpha; near-black dust
+            # pixels round to equal channels, so threshold the dominance
+            self.assertLessEqual(r, g, "rain pixel not green: %s" % ((r, g, b),))
+            self.assertLessEqual(b, g, "rain pixel not green: %s" % ((r, g, b),))
+            if g > 200 and g - max(r, b) > 30:
+                strong += 1
+        self.assertGreater(strong, 0, "no strongly green rain pixels")
+
+    def test_matrix_head_churns_hue_then_settles(self):
+        # the down-most pixel of a drop cycles through several tints while it
+        # travels the first half of its pass, then keeps one tint (tint_at);
+        # each pass settles on its own (LCG-mixed) hue
+        x = 5
+        gap = 4 + (x * 3) % 6
+        settle = ((H + gap) * render.SUB) // 2
+        pass_hues = []          # settled hue of each pass seen
+        cur = set()
+        for f in range(2100):
+            c16, L16, bright, seed_v = render.matrix_col(x, H, f)
+            if c16 < settle:
+                continue
+            cur.add(render.tint_at(seed_v, c16, settle))
+            nxt, _, _, _ = render.matrix_col(x, H, f + 1)
+            if nxt < settle:    # head wrapped to the next pass
+                pass_hues.append(cur)
+                cur = set()
+        self.assertTrue(pass_hues, "no settled stretch observed")
+        for settled in pass_hues:
+            self.assertEqual(len(settled), 1,
+                             "head never settles on one hue: %s" % settled)
+        self.assertGreater(len({h for s in pass_hues for h in s}), 1,
+                           "every pass settles on the same hue")
+
+    def test_matrix_tints_are_all_green_dominant(self):
+        for (r, g, b) in render.MATRIX_TINTS:
+            self.assertLess(r, g, "tint not green: %s" % ((r, g, b),))
+            self.assertLess(b, g, "tint not green: %s" % ((r, g, b),))
 
     def test_matrix_is_subpixel_smooth(self):
-        # anti-aliasing: a head must not be a full-brightness dot teleporting
-        # row to row — the drop's fractional position must show up as partial
-        # brightness on two adjacent rows (the transition), and tier phases
-        # must advance a non-integer number of rows per tick
-        mid = 26  # a column with tier (2, 3, ...)
-        prof = []
-        for f in range(3):
+        # a head must not be a full-brightness dot teleporting row to row:
+        # the drop's fractional position must show up as partial brightness,
+        # i.e. the column's peak brightness varies over time (the exact
+        # non-stepping guarantee is asserted on the model in
+        # test_matrix_motion_is_subpixel_continuous / tiers)
+        mid = next(x for x in range(W)
+                   if render.MATRIX_TIERS[render._tier_of(x)][0] == 4)
+        peaks = []
+        for f in range(400):
             fb = frame(lambda d, f: render.draw_matrix(d, W, H, f), f)
-            prof.append([fb[y][mid][1] for y in range(H)])
-        # the head pixel must sometimes sit between two rows: some frame has
-        # its max pixel less than the per-tier max alpha (partial head)
-        heads = [max(p) for p in prof if max(p)]
-        self.assertTrue(any(h < 250 for h in heads),
-                        "heads never anti-aliased: %s" % (heads,))
-        self.assertEqual(render.MATRIX_TIERS[0][0:2], (1, 3))  # slow < 1 row/tick
+            p = [fb[y][mid][1] for y in range(H)]
+            if max(p):
+                peaks.append(max(p))
+                if len(peaks) >= 8 and len(set(peaks)) > 1:
+                    break
+        self.assertGreaterEqual(len(peaks), 8, "col %d never lit" % mid)
+        self.assertGreater(len(set(peaks)), 1,
+                           "head brightness never varies (no subpixel"
+                           " partials): %s" % (sorted(set(peaks)),))
 
     def test_matrix_tiers_differ_in_speed_and_brightness(self):
         # every tier must actually be configured, with visibly different
-        # speeds (1, 2, 4 rows per 3 ticks) and strictly increasing brightness
-        self.assertEqual(len(render.MATRIX_TIERS), 3)
+        # speeds (none a whole number of rows per tick) and strictly
+        # increasing brightness
+        self.assertEqual(len(render.MATRIX_TIERS), 5)
         for (rows, per, bright) in render.MATRIX_TIERS:
-            self.assertEqual(per, 3)  # denominator 3 -> phases don't step
-        self.assertEqual([t[0] for t in render.MATRIX_TIERS], [1, 2, 4])
+            self.assertIn(per, (2, 4, 6, 8, 12))
+            # the per-tick subpixel step must not be a whole row (stepped)
+            self.assertNotEqual((rows * render.SUB // per) % render.SUB, 0,
+                                "tier %s steps whole rows" % ((rows, per),))
+        self.assertEqual([t[0] for t in render.MATRIX_TIERS], [1, 1, 1, 4, 1])
         lums = [(255 * t[2]) // 100 for t in render.MATRIX_TIERS]
         self.assertEqual(lums, sorted(lums), "tiers not dark -> bright")
 
@@ -211,30 +259,33 @@ class TestAnimations(unittest.TestCase):
                     self.assertLessEqual(dy, 2, "col %d jumped %d rows" % (x, dy))
 
     def test_matrix_speeds_vary_between_columns(self):
-        # exact speeds from the exposed subpixel state: the three tiers move
-        # 1, 2, 4 rows per 3 ticks (mod the wrap), all of them present
+        # exact speeds from the exposed subpixel state: the five tiers move
+        # 1, 1, 1, 4, 1 rows per 12, 6, 4, 12, 2 ticks (mod the wrap), all present
         speeds = set()
         for x in range(W):
-            rows = render.MATRIX_TIERS[render._tier_of(x)][0]
-            c0, _, _ = render.matrix_col(x, H, 100)
-            c3, _, _ = render.matrix_col(x, H, 103)
-            adv = (c3 - c0) % ((H + 4 + (x * 3) % 6) * render.SUB)
-            self.assertEqual(adv, (rows * 3 * render.SUB)
-                             // render.MATRIX_TIERS[render._tier_of(x)][1]
-                             % ((H + 4 + (x * 3) % 6) * render.SUB),
+            tier = render._tier_of(x)
+            rows, per, _ = render.MATRIX_TIERS[tier]
+            loop = (H + render._gap_of(x)) * render.SUB
+            f0 = 100
+            c0, *_ = render.matrix_col(x, H, f0)
+            c3, *_ = render.matrix_col(x, H, f0 + 3)
+            adv = (c3 - c0) % loop
+            self.assertEqual(adv,
+                             ((rows * render.SUB * (f0 + 3)) // per
+                              - (rows * render.SUB * f0) // per) % loop,
                              "col %d advances %s per 3 ticks" % (x, adv))
             speeds.add(rows)
-        self.assertEqual(speeds, {1, 2, 4},
-                         "columns do not cover all three tier speeds")
+        self.assertEqual(speeds, {1, 4},
+                         "columns do not cover all tier speeds")
 
     def test_matrix_motion_is_subpixel_continuous(self):
         # every tier's per-tick phase increment is NOT a whole row (no exact
         # row-multiples), so anti-aliased heads glide instead of teleporting
         for x in range(W):
             for f in range(6):
-                c0, _, _ = render.matrix_col(x, H, f)
-                c1, _, _ = render.matrix_col(x, H, f + 1)
-                step = (c1 - c0) % ((H + 4 + (x * 3) % 6) * render.SUB)
+                c0, *_ = render.matrix_col(x, H, f)
+                c1, *_ = render.matrix_col(x, H, f + 1)
+                step = (c1 - c0) % ((H + render._gap_of(x)) * render.SUB)
                 self.assertNotEqual(step % render.SUB, 0,
                                     "col %d steps a whole row at f=%d" % (x, f))
 
@@ -244,13 +295,57 @@ class TestAnimations(unittest.TestCase):
         self.assertGreater(len(first_y), 1, "all heads share one phase")
 
     def test_matrix_covers_the_board(self):
+        # window spans several loops per tier: slow crawl columns sit dark in
+        # their gap for over a hundred frames, and ~1 pass in 10 rests whole
         cols = set()
-        for f in range(24):
+        for f in range(400):
             fb = frame(lambda d, f: render.draw_matrix(d, W, H, f), f)
-            for x in range(W):
+            for x in set(range(W)) - cols:
                 if any(fb[y][x] != (0, 0, 0) for y in range(H)):
                     cols.add(x)
+            if len(cols) == W:
+                break
         self.assertEqual(cols, set(range(W)), "matrix rain misses columns")
+
+    def test_matrix_rest_passes_breathe_density(self):
+        # ~1 pass in 10 rests: some column is dark (matrix_col L16 == 0) at
+        # most times — but never the whole board, and rests eventually end
+        frames_with_rests = 0
+        for f in range(600):
+            resting = sum(1 for x in range(W)
+                          if render.matrix_col(x, H, f)[1] == 0)
+            frames_with_rests += (resting > 0)
+            self.assertLess(resting, W,
+                            "every column rests at once at f=%d" % f)
+            if len({render.matrix_col(x, H, f)[1] == 0
+                    for x in range(W)}) > 1:
+                break
+        self.assertGreater(frames_with_rests, 0, "no resting pass ever seen")
+
+    def test_matrix_most_drops_stay_classic_green(self):
+        # ~4 passes in 5 keep the classic rain green (seed 0, which never
+        # churns); only the rest cycle the accent tints and settle on their
+        # own accent. Count at pass boundaries (head position wraps).
+        base = accents = 0
+        for x in range(0, W, 2):                # every other column
+            prev_c16 = render.matrix_col(x, H, 0)[0]
+            for f in range(1, 2200):
+                c16, L16, _, seed = render.matrix_col(x, H, f)
+                if c16 < prev_c16:              # wrapped -> new pass
+                    base += (seed == 0)
+                    accents += (0 < seed <= render.N_ACCENT)
+                # update every frame: skipping resting passes (L16 == 0)
+                # leaves a stale prev and misreads every frame after the
+                # wrap as a new pass
+                prev_c16 = c16
+        self.assertGreater(base / max(1, accents), 2.0,
+                           "accent passes are not a minority "
+                           "(base %d, accents %d)" % (base, accents))
+        for s in range(1, render.N_ACCENT + 1):
+            self.assertEqual(render.tint_at(s, 10 ** 9, 1000), s,
+                             "accent heads must settle on their own tint")
+        self.assertEqual(render.tint_at(0, 12345, 100), 0,
+                         "classic-green passes must never churn")
 
     # -- rotation integration ----------------------------------------------
     # The rain is user-toggled by button A's IRQ handler (main.py); presses
@@ -290,6 +385,148 @@ class TestAnimations(unittest.TestCase):
         self.assertTrue(rain, "the press never started the rain")
         self.assertGreater(len(clocks), 26,
                            "rotation never resumed after the rain timebox")
+
+    def test_rain_runs_at_30_frames_per_virtual_second(self):
+        # the rain loop paces to 30 fps (1/30 s frame deadline in
+        # maybe_show_rain); the mocked sleeps advance virtual time 33.3 ms
+        # per frame. Rain starts at the slot boundary after the press (≤5 s
+        # later) and runs to the end of the ~39 s window: at 30 fps that is
+        # 1020+ frames; the old 50 ms tick would have produced < 800.
+        rain = self._with_presses((21.0,), "draw_matrix", 60.0)
+        self.assertTrue(rain, "the press never started the rain")
+        self.assertGreater(len(rain), 30 * 30,
+                           "rain is not running at ~30 fps: %d frames in"
+                           " ~35 virtual s of rain" % len(rain))
+
+    # -- rain-clock overlay --------------------------------------------------
+    # With a trusted RTC, rain mode pours the rain over the clock
+    # (render.draw_rain_clock); with the RTC untrusted it runs alone.
+
+    def test_rain_mode_shows_the_clock_over_the_rain(self):
+        # default mock: NTP synced -> RTC trusted -> the clock overlays
+        shots = self._with_presses((21.0,), "draw_rain_clock", 60.0)
+        self.assertTrue(shots, "rain mode never showed the clock overlay")
+
+    def test_rain_mode_without_rtc_runs_bare_rain(self):
+        # wifi down (no NTP) and the RTC still at its 2023 boot epoch: the
+        # rain runs alone rather than show a wrong time (same rule as the
+        # rotation's clock-hiding). Presses must be keyed to the boot epoch —
+        # without NTP the mock's clock never reaches SYNCED_EPOCH.
+        run_main.WIFI_OK = False
+        run_main.FakePin.press_at = (run_main.BOOT_EPOCH + 21.0,)
+        try:
+            overlay = run_main.run_screen_current("draw_rain_clock", 60.0)
+            bare = run_main.run_screen_current("draw_matrix", 60.0)
+        finally:
+            run_main.WIFI_OK = True
+            run_main.FakePin.press_at = ()
+        self.assertFalse(overlay, "clock overlay shown although RTC is 2023")
+        self.assertTrue(bare, "no rain at all without a trusted RTC")
+
+    def test_rain_clock_dims_rain_behind_bright_digits(self):
+        # inside the clock's padded text box the rain is dimmed to
+        # MATRIX_DIM % alpha, so no rain pixel reads brighter than the
+        # (255,255,255) digits; outside the box it stays full brightness
+        sim = simmod.SimGraphics(W, H)
+        colon_adv = 3
+        tw = sim.measure_text("23", 1) + colon_adv + sim.measure_text("59", 1)
+        x0 = max(0, (W - tw) // 2 - 1)
+        x1 = min(W, x0 + tw + 2)
+        y0, y1 = 1, min(H, render.TEXT_Y + 7)
+        digits = brightest_outside = 0
+        for f in range(0, 60, 3):
+            fb = frame(lambda d, ff: render.draw_rain_clock(
+                d, W, H, "23", "59", False, ff), f)
+            for y in range(H):
+                for x in range(W):
+                    r, g, b = fb[y][x]
+                    if (r, g, b) == render.WHITE:
+                        if x0 <= x < x1 and y0 <= y < y1:
+                            digits += 1
+                    elif g > 120:  # a rain pixel brighter than the dim cap
+                        if x0 <= x < x1 and y0 <= y < y1:
+                            self.fail("undimmed rain pixel %s behind the "
+                                      "clock box at (%d,%d)" % ((r, g, b), x, y))
+                        brightest_outside += 1
+        self.assertGreater(digits, 0, "no bright digits in the clock box")
+        self.assertGreater(brightest_outside, 0,
+                           "no full-brightness rain outside the clock box")
+
+    def test_dim_mask_dims_the_whole_field(self):
+        mask = bytearray(W * H)
+        for x in range(W):
+            for j in range(H):
+                mask[x * H + j] = 1
+        produced_rain = False
+        for f in range(0, 90, 5):
+            dim_fb = frame(lambda d, ff: render.draw_matrix(
+                d, W, H, ff, dim_mask=mask), f)
+            full_fb = frame(lambda d, ff: render.draw_matrix(d, W, H, ff), f)
+            for row in dim_fb:
+                for (r, g, b) in row:
+                    self.assertLessEqual(max(r, g, b), 120,
+                                         "masked rain pixel not dimmed")
+            if any(p[1] > 200 for row in full_fb for p in row):
+                produced_rain = True
+        self.assertTrue(produced_rain, "control run: no bright rain at all")
+
+    def test_rain_clock_fades_in_and_out(self):
+        # fade phases the overlay: 0 = bare rain (no digits, identical
+        # in-box rain to plain draw_matrix), stepping up dims the in-box
+        # rain monotonically until the full overlay
+        sim = simmod.SimGraphics(W, H)
+        colon_adv = 3
+        tw = sim.measure_text("23", 1) + colon_adv + sim.measure_text("59", 1)
+        x0 = max(0, (W - tw) // 2 - 1)
+        x1 = min(W, x0 + tw + 2)
+        y0, y1 = 1, min(H, render.TEXT_Y + 7)
+        maxdim = {f: 0 for f in range(render.MATRIX_FADE_STEPS + 1)}
+        for f in range(0, 120, 7):
+            for fade in range(render.MATRIX_FADE_STEPS + 1):
+                fb = frame(lambda d, ff: render.draw_rain_clock(
+                    d, W, H, "23", "59", False, ff, fade=fade), f)
+                for y in range(y0, y1):
+                    for x in range(x0, x1):
+                        r, g, b = fb[y][x]
+                        if r == g == b:
+                            continue    # a digit pixel, not rain
+                        maxdim[fade] = max(maxdim[fade], max(r, g, b))
+        bare_max = 0
+        for f in range(0, 120, 7):
+            bare = frame(lambda d, ff: render.draw_matrix(d, W, H, ff), f)
+            for y in range(y0, y1):
+                bare_max = max(bare_max,
+                               max(max(p) for p in bare[y][x0:x1]))
+        self.assertEqual(maxdim[0], bare_max,
+                         "fade 0 is not bare rain inside the clock box")
+        self.assertGreater(maxdim[0], maxdim[render.MATRIX_FADE_STEPS] + 80,
+                           "the overlay does not dim the rain behind the "
+                           "clock at full strength")
+        # monotonic dimming: the in-box rain never brightens as the overlay
+        # strengthens
+        for fade in range(render.MATRIX_FADE_STEPS):
+            self.assertGreaterEqual(maxdim[fade], maxdim[fade + 1],
+                                    "in-box rain brightens as the overlay "
+                                    "strengthens (fade=%d)" % fade)
+
+    def test_faded_rain_clock_draws_digits_on_the_ramp(self):
+        # each fade level draws digit pixels in exactly its ramp shade
+        # (255*fade//STEPS), until fade 0 removes them entirely
+        for fade in (1, 3, 8):
+            dh = 255 * fade // render.MATRIX_FADE_STEPS
+            hits = 0
+            fb = frame(lambda d, ff: render.draw_rain_clock(
+                d, W, H, "23", "59", False, ff, fade=fade), 10)
+            for row in fb:
+                for px in row:
+                    if px == (dh, dh, dh):
+                        hits += 1
+            self.assertGreater(hits, 0, "no digit pixels at shade %d "
+                                        "(fade=%d)" % (dh, fade))
+        gone = frame(lambda d, ff: render.draw_rain_clock(
+            d, W, H, "23", "59", False, ff, fade=0), 10)
+        self.assertNotIn(render.WHITE, (px for row in gone for px in row),
+                         "digits visible at fade 0")
 
 
 GOLDEN_WEATHER_RAIN_F0 = (

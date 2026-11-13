@@ -182,6 +182,9 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     # (jumps of 3 per second, which is what made rain appear to fall upwards)
     fake_time.time = lambda: int(state["t"])
     fake_time.ticks_ms = lambda: int(state["t"] * 1000) % (1 << 30)
+    fake_time.ticks_us = lambda: int(state["t"] * 1000000) % (1 << 30)
+    # MicroPython ticks_add: wraparound-aware addition in the ticks domain
+    fake_time.ticks_add = lambda a, b: (a + b) % (1 << 30)
     # MicroPython ticks_diff: wraparound-aware signed difference over the
     # full ticks range (used by the button debounce)
     fake_time.ticks_diff = lambda a, b: \

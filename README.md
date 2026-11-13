@@ -14,13 +14,24 @@ MicroPython. A weather clock that rotates four screens on the matrix:
 - **CO2** — ppm from an optional SCD41 sensor on the STEMMA QT connector,
   color-coded green/amber/red by indoor air quality
 
-Buttons: **A** toggles the **matrix rain** mode — fragments of green code
-green code rain, one anti-aliased drop per column (subpixel motion, gradual
-brightness between rows) with a bright head and fading trail, in three
-speed/brightness tiers (slow+dim "far", mid, fast+bright "near"). One press
-plays it full-screen for two minutes (a second press stops it early), then
-the regular rotation resumes. The rain keeps a persistent frame tick across
-runs, so it always continues where it left off.
+Buttons: **A** toggles the **matrix rain** mode — one anti-aliased drop per
+column (subpixel motion, gradual brightness between rows) with a fading trail.
+Five speed/brightness tiers (very dim crawl → full-brightness sprint) are
+hashed across the columns, gaps between passes span 4–11 rows, and ~1 pass in
+10 rests entirely, so the rain's density and tempo visibly breathe; each drop's
+head cycles through a few subtle green variations as it falls and settles on
+its hue
+for the second half of the pass, and every pass mixes its hue and trail length
+from a deterministic LCG (no randomness — sim and board render identically).
+One press plays it full-screen for two minutes (a second press stops it early),
+then the regular rotation resumes. With a trusted RTC the clock shows through
+the rain (`sim/sim.py --screen rainclock`): the clock phases in over ~0.5 s
+on entry and back out on exit, and at full strength the field dims to 35 %
+alpha inside the clock's text box while bright white digits draw on top, so
+the rain visibly
+pours across the time; without a trusted RTC the rain runs alone (same rule as
+the rotation's clock-hiding). The rain keeps a persistent frame tick
+across runs, so it always continues where it left off.
 
 ![Display loop demo](docs/demo-rotation.gif)
 
@@ -32,7 +43,8 @@ host sim from the real `main.py` — regenerate with
 ![Matrix rain demo](docs/demo-matrix.gif)
 
 The matrix rain mode, `python3 sim/sim.py play --screen matrix --frames 60
---delay 0.05 --gif docs/demo-matrix.gif`; `sim/check_demo_gif.py` (CI) enforces
+--delay 0.03 --gif docs/demo-matrix.gif` (30 ms preview grid; the board paces
+the same frames at 1/30 s ≈ 33 ms); `sim/check_demo_gif.py` (CI) enforces
 that both GIFs match the code.
 
 ## Hardware & host setup

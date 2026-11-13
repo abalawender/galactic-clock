@@ -284,63 +284,180 @@ def draw_icon(d, code, frame, ox=0, oy=0, is_day=1):
 
 SUB = 16  # subpixel steps per row (fixed-point position)
 
-MATRIX_BASE_HEAD = (190, 255, 170)   # near-white green at full alpha
-# tier = (rows, per, brightness %). All tiers share denominator 3 so every
-# column's phase moves a non-integer number of rows per tick — combos like
-# "1 row/tick" would translate the whole streak in whole-row jumps and look
-# stepped again. Brightness scalar keeps pixels distinct per tier: a head is
-# never darker than any trail (head keeps r > 0 contribution, trails scale
-# toward black with distance).
+# Head-hue palette the falling head pixel cycles through. Tint 0 is the
+# classic rain green — kept saturated rather than whitish so the field reads
+# unmistakably green (~4 passes in 5, shimmering between the base tint and a
+# subtle neighbor and settling back). The other passes cycle the subtle
+# accent tints (compressed teal-ish and chartreuse-ish drifts, green channel
+# pinned at 255, red/blue pulled down toward green) and settle on their
+# assigned one. Still reads as green rain at a glance, just greener.
+MATRIX_TINTS = (
+    (170, 255, 130),
+    (150, 255, 150),
+    (128, 255, 170),
+    (198, 255, 100),
+    (218, 255, 88),
+)
+N_ACCENT = 4                   # tints 1..N_ACCENT are the accent hues
+MATRIX_CHURN_SUB = SUB // 4    # one hue step per quarter-row of travel:
+                               # the head pixel cycles tints several times
+                               # per row it drops (fast shimmer)
+# tier = (rows, per, brightness %). Every tier's phase advances a
+# non-integer number of rows per tick (per never divides rows*SUB), so
+# anti-aliased heads glide instead of stepping. Brightness grows with
+# speed: fast reads near, slow reads far. At the 1/30 s tick these are
+# ~3.75 / 5 / 7.5 / 10 / 15 rows per second.
 MATRIX_TIERS = (
-    (1, 3, 45),   # slow: 1 row per 3 ticks, dim — the "far background"
-    (2, 3, 75),   # mid: 2 rows per 3 ticks
-    (4, 3, 100),  # fast: 4 rows per 3 ticks, full brightness
+    (1, 8, 50),   # crawl, dim — the "far background"
+    (1, 6, 65),   # slow
+    (1, 4, 80),   # mid
+    (4, 12, 90),  # brisk
+    (1, 2, 100),  # sprint, full brightness
 )
 
 
+def _hash16(x, salt):
+    """16-bit multiplicative hash of (x, salt): adjacent inputs scatter and
+    every product stays a MicroPython small int (< 2**30, no bignum cost)."""
+    return ((x * 40503 & 0xFFFF) ^ (salt * 21649 & 0xFFFF)) & 0x3FFFFFFF
+
+
 def _tier_of(x):
-    return (x * 5) % len(MATRIX_TIERS)
+    # per-column tier from a 16-bit hash — a plain modulo cycles too
+    # regularly; the hash scatters adjacent columns over all tiers
+    return (_hash16(x, 1) >> 4) % len(MATRIX_TIERS)
+
+
+def _gap_of(x):
+    # blank stretch before respawn, per column, 4..11 rows: columns still
+    # differ in how densely they rain (duty 0.7..1.0 of the loop) but the
+    # board reads dense overall; the slower the tier, the longer the dark
+    # stretch lasts, which reads as depth
+    return 4 + (_hash16(x, 2) >> 6) % 8
 
 
 def matrix_col(x, h, frame):
-    """Subpixel drop state of column x at frame: (c16, L16, bright) — head
-    position in 1/SUB-row steps (mod the column loop), trail length, tier
-    brightness. Exposed for tuning and exact tests; draw_matrix only rasterizes
-    what this state implies."""
-    rows, per, bright = MATRIX_TIERS[_tier_of(x)]
-    gap = 4 + (x * 3) % 6             # blank stretch before respawn
-    L = 4 + (x % 3)                   # trail length in rows
-    L16 = L * SUB
+    """Subpixel drop state of column x at frame: (c16, L16, bright, seed) —
+    head position in 1/SUB-row steps (mod the column loop), trail length in
+    rows (0 = resting pass: the column drops nothing this pass, so local
+    density breathes), tier brightness, and the per-pass LCG seed for the
+    head-hue schedule. Exposed for tuning and exact tests; draw_matrix only
+    rasterizes what this state implies. Trail length and the resting/active
+    decision mix from a hash over (column index and the pass number — one
+    pass = one full drop travel), so density, speed mix, hue and trail vary
+    pass to pass while staying deterministic. Constants stay under 2**30 so
+    every product is a MicroPython small int — no bignum allocation per
+    column and frame (a 32-bit LCG constant measured ~16 ms/frame slower)."""
+    tier = _tier_of(x)
+    rows, per, bright = MATRIX_TIERS[tier]
+    gap = _gap_of(x)
     loop16 = (h + gap) * SUB
-    c16 = ((rows * SUB * frame) // per + (x * 37) * SUB) % loop16
-    return c16, L16, bright
+    u = (rows * SUB * frame) // per + (x * 37) * SUB   # + per-column phase
+    pass_idx = u // loop16            # one pass = one full drop travel
+    mix = _hash16(x, pass_idx)
+    L = 4 + (mix >> 8) % 3            # 4..6 rows of trail per pass
+    if (mix >> 3) % 10 == 0:          # ~1 pass in 10 rests: density breathes
+        L = 0
+    # head hue: ~1 pass in 5 takes an accent tint (1..N_ACCENT), the rest
+    # stay classic green (seed 0) — every pass shimmers its bottom pixel
+    variant = (mix >> 5) % 5
+    seed = 1 + (mix >> 11) % N_ACCENT if variant == 0 else 0
+    return u % loop16, L * SUB, bright, seed
 
 
-# Pen memo for draw_matrix: the pixel color only depends on (a, L16, bright)
-# — all int, few hundred distinct pens — so cache PicoGraphics pen handles by
-# int key (L16<<21 | bright<<11 | a) instead of recomputing 3 multiplies,
-# 3 divisions and re-creating a pen for every pixel of every frame. Board
-# benchmark: 41 ms/frame naively-weighted -> 24 ms with the memo (the scanout
-# stays ~2 ms; measured over 260 frames on the Pico W).
+def tint_at(seed, pos16, settle_pos16):
+    """Head-hue schedule (the bottom-pixel shimmer). The head drops one
+    row and cycles several hues within that row (one churn step per
+    quarter-row), then — halfway down the pass — settles on its pass tint
+    for the rest of the fall. seed 0 = classic green pass, mostly the base
+    tint with a dip into a subtle neighbor on every 4th step; accent
+    passes (seed 1..N_ACCENT) cycle the accent tints. Trail pixels keep
+    the hue the head had when it passed them."""
+    if pos16 >= settle_pos16:
+        return seed
+    step = pos16 // MATRIX_CHURN_SUB
+    if seed == 0:
+        if step % 4 != 3:
+            return 0
+        return 1 if (step // 4) % 2 == 0 else 3
+    return 1 + (step + seed - 1) % N_ACCENT
+
+
+# Pen memo for draw_matrix: the pixel color depends on (tint, bright, L16,
+# alpha bucket) — only ~89 alpha buckets exist per (L16, bright, tint) — so
+# pens are cached in a dict keyed by one int
+# (bucket | tint<<8 | bright<<12 | L16<<19) instead of re-creating a pen per
+# pixel. The bucket quantization bounds the memo (~few thousand entries, a
+# few KB); exact-alpha keys proved effectively unbounded (heap full in ~3 s
+# on board with the sub-integer rows/tick tiers). Board benchmark of this
+# loop: 41 ms/frame naive -> ~29 ms (scanout stays ~2 ms).
 _PEN_MEMO = {}
 
+# Log-shaped trail-fade table: alpha weight per subpixel distance behind the
+# head, exponential decay with a 2-row half-life (×2^(-1/32) per subpixel
+# step, integer fixed point, ×251/256). Fades a bit faster early than the
+# linear ramp it replaces, then levels off into a long dim tail — visually a
+# log curve (linear's tail end is ~1.6% of head brightness, this keeps ~11%).
+# The half-life can't be much shorter: the pixel holding the head sits at
+# clamped dc 0..8, so f^8 sets its dimmest subpixel step (0.85 here) — steeper
+# curves dip the "live" head well below the strongly-green threshold. Built
+# at import for the only three trail lengths matrix_col ever yields
+# (L = 4..6 rows → L16 = 64/80/96); draw_matrix indexes the dict directly,
+# since a per-column builder call measured ~2.7 ms/frame extra. Weights stay
+# <= L16 <= 96, so a byte holds each. Index is the clamped center distance
+# dc the loop already computes; f[0] = L16 is the reference full brightness.
+def _build_fade(L16):
+    f = bytearray(L16)
+    w = L16 << 8
+    for i in range(L16):
+        f[i] = w >> 8
+        w = w * 251 >> 8
+    return f
 
-def draw_matrix(d, w, h, frame):
+
+# The rain-clock overlay: rain inside the clock's text box is dimmed toward
+# MATRIX_DIM % of its alpha (draw_matrix's optional dim_mask, built by
+# draw_rain_clock), so the bright digits read over the pouring field even
+# where a drop head passes directly behind them. The dim strength is keyed
+# by the overlay's fade LEVEL, not a flag: draw_rain_clock phases the
+# overlay in/out over MATRIX_FADE_STEPS quantized levels, and the level is
+# part of the pen-memo key so every level owns its own pens (a stronger
+# level's pixels never collide with a dimmer one's — bits 26..29, above
+# L16's last bit 25).
+MATRIX_DIM = 35          # % of full alpha at the overlay's full strength
+MATRIX_FADE_STEPS = 8    # 0 = bare rain, no digits; STEPS = full overlay
+
+
+_FADE_TAB = {L * SUB: _build_fade(L * SUB) for L in (4, 5, 6)}
+
+
+def draw_matrix(d, w, h, frame, dim_mask=None, dim_level=MATRIX_FADE_STEPS):
     """Green code-rain falling down the whole matrix: one anti-aliased drop
-    per column, staggered speeds and phases (three speed/brightness tiers,
-    see MATRIX_TIERS). Fixed-point math only — identical output on board and
-    host sim. Rasterizer is board-tuned: no min/max calls, no per-pixel pen
-    arithmetic (memoized), bound attribute lookups."""
+    per column, staggered speeds and phases (five speed/brightness tiers,
+    see MATRIX_TIERS), head pixel cycling through MATRIX_TINTS and settling
+    to its pass hue halfway down; trail pixels keep their emission-time hue.
+    dim_mask (rain-clock overlay, draw_rain_clock) is a w*h bytearray
+    laid out [x * h + j]: pixels flagged there draw at the dim strength of
+    dim_level (0 = bare rain; the caller skips the mask in that case).
+    Fixed-point math only — identical output on board and host sim.
+    Rasterizer is board-tuned: no min/max calls, memoized pens, bound
+    attribute lookups."""
     SUB2 = SUB // 2
     set_pen = d.set_pen
     pixel = d.pixel
     create_pen = d.create_pen
     memo = _PEN_MEMO
     mget = memo.get
+    mask = dim_mask
+    # overlay dimming: quantized fade level -> % of full alpha (the level
+    # rides the pen memo's key, see MATRIX_FADE_STEPS above the function)
+    dimb = (dim_level << 26) if mask else 0
+    dimp = MATRIX_DIM if dim_level >= MATRIX_FADE_STEPS \
+        else 100 - (100 - MATRIX_DIM) * dim_level // MATRIX_FADE_STEPS
     for x in range(w):
-        c16, L16, bright = matrix_col(x, h, frame)
-        base_key = (L16 << 21) | (bright << 11)
-        br, bg, bb = MATRIX_BASE_HEAD
+        c16, L16, bright, seed_v = matrix_col(x, h, frame)
+        if L16 == 0:            # resting pass: the cov math below would
+            continue            # draw nothing anyway; skip its overhead
         lo = c16 - L16              # streak top edge (may be < 0)
         j0 = lo // SUB
         if j0 < 0:
@@ -348,6 +465,10 @@ def draw_matrix(d, w, h, frame):
         j1 = (c16 - 1) // SUB       # row holding the head
         if j1 > h - 1:
             j1 = h - 1
+        # the head settles at its pass hue halfway down the loop
+        settle_pos = ((h + _gap_of(x)) * SUB) // 2
+        fade = _FADE_TAB[L16]
+        mo = x * h if mask else 0   # dim-mask column base
         for j in range(j0, j1 + 1):
             top = j * SUB
             # coverage = overlap of pixel [j, j+1) with streak [lo, c16],
@@ -356,26 +477,88 @@ def draw_matrix(d, w, h, frame):
                 - (lo if lo > top else top)
             if cov <= 0:
                 continue
-            # fade with distance behind the head (center-based, clamped)
+            # hue: the head row uses the live position; rows the head has
+            # already passed freeze at their emission position
+            pos = c16 if c16 < top + SUB else top + SUB
+            # head-hue schedule (tint_at inlined): the head cycles hues
+            # several times per row of travel; base passes mostly stay on
+            # the classic green, accent passes cycle the accents
+            if pos >= settle_pos:
+                ti = seed_v
+            elif seed_v:
+                ti = 1 + (pos // MATRIX_CHURN_SUB + seed_v - 1) % N_ACCENT
+            elif (pos // MATRIX_CHURN_SUB) % 4 == 3:
+                ti = 1 if ((pos // MATRIX_CHURN_SUB) // 4) % 2 == 0 else 3
+            else:
+                ti = 0
+            # log-shaped fade with distance behind the head (center-based
+            # weight, clamped) — see _FADE_TAB above the pen memo
             dc = c16 - top - SUB2
             if dc < 0:
                 dc = 0
             elif dc >= L16:
                 dc = L16 - 1
-            a = cov * (L16 - dc)    # 0..SUB*L16 alpha numerator
-            key = base_key | a
+            a = cov * fade[dc]      # 0..SUB*L16 alpha numerator
+            if mask:
+                if mask[mo + j]:
+                    a = a * dimp // 100
+            # memo key: alpha is quantized to its top 4 bits' index (q, at
+            # most ~89 levels) — without this the exact subpixel alpha set
+            # grows with every frame's fractional head position and the memo
+            # is effectively unbounded (filled the heap in ~3 s on board);
+            # pens are built from the bucket MIDPOINT so colors are
+            # order-independent and identical on sim and board. a < 2**11,
+            # so q < 2**7; ti < 8; bright <= 100, L16 < 2**7; bits 26..29
+            # carry the rain-clock overlay's fade level (MASK_FADE_STEPS)
+            # so the dimmed alpha spaces never share a pen with the
+            # full-brightness ones.
+            q = a >> 4
+            key = (q | (ti << 8) | (bright << 12) | (L16 << 19) | dimb)
             pen = mget(key)
             if pen is None:
+                am = (q << 4) | 8           # bucket midpoint alpha
                 den = SUB * L16 * 100
-                pen = create_pen(br * a * bright // den,
-                                 bg * a * bright // den,
-                                 bb * a * bright // den)
+                tc = MATRIX_TINTS[ti]
+                pen = create_pen(tc[0] * am * bright // den,
+                                 tc[1] * am * bright // den,
+                                 tc[2] * am * bright // den)
                 memo[key] = pen
             set_pen(pen)
             pixel(x, j)
 
 
-# --- screens ---------------------------------------------------------------
+# --- screens --------------------------------------------------------------
+
+def draw_rain_clock(d, w, h, hh, mm, blink, frame, fade=MATRIX_FADE_STEPS):
+    """Clock rendered through the matrix rain (the mode shown while button
+    A's rain deadline is live): the field keeps falling everywhere, but its
+    alpha is scaled down inside the clock's padded text box so the bright
+    digits read clearly while drops visibly pour across them. fade phases
+    the overlay (matrix mode's entry/exit): 0 = bare rain, no digits;
+    MATRIX_FADE_STEPS = the full overlay. Digit brightness rides the same
+    fade, so the clock dissolves into the field instead of popping in/out.
+    Blink and the HH/MM layout reuse draw_clock; same deterministic
+    contract as the plain rain (frame tick only)."""
+    clear(d, w, h)               # draw_matrix only paints the rain pixels
+    if fade <= 0:                # bare rain: no box, no digits
+        draw_matrix(d, w, h, frame)
+        return
+    # the digits brighten on the same quantized ramp as the rain dims —
+    # one interpolated pen per frame (draw_clock converges blink pixels
+    # onto it)
+    dh = 255 * fade // MATRIX_FADE_STEPS
+    mask = bytearray(w * h)
+    # same layout math as draw_clock, padded a pixel on each side
+    colon_adv = 3
+    tw = d.measure_text(hh, 1) + colon_adv + d.measure_text(mm, 1)
+    x0 = max(0, (w - tw) // 2 - 1)
+    x1 = min(w, x0 + tw + 2)
+    for x in range(x0, x1):
+        for j in range(1, min(h, TEXT_Y + 7)):
+            mask[x * h + j] = 1
+    draw_matrix(d, w, h, frame, dim_mask=mask, dim_level=fade)
+    draw_clock(d, w, h, hh, mm, blink, color=(dh, dh, dh))
+
 
 def draw_weather(d, w, h, code, temp_text, frame, is_day=1):
     """Icon + temperature as one group, centered so no space is wasted right."""
@@ -388,11 +571,13 @@ def draw_weather(d, w, h, code, temp_text, frame, is_day=1):
     d.text(temp_text, x0 + icon_w + gap, TEXT_Y, scale=1)
 
 
-def draw_clock(d, w, h, hh, mm, blink):
+def draw_clock(d, w, h, hh, mm, blink, color=None):
+    # color=None keeps the rotation's clock-cyan; the rain overlay passes the
+    # bright rain-white so the digits pop over the field
     colon_adv = 3  # reserved px for the colon, keeps layout stable
     tw = d.measure_text(hh, 1) + colon_adv + d.measure_text(mm, 1)
     x = (w - tw) // 2
-    d.set_pen(d.create_pen(*CLOCK))
+    d.set_pen(d.create_pen(*(color or CLOCK)))
     d.text(hh, x, TEXT_Y, scale=1)
     if blink:  # two pixels, 1 Hz blink driven by time.ticks_ms() on the board
         cx = x + d.measure_text(hh, 1) + 1

@@ -139,6 +139,10 @@ def make_screen_fn(args):
         return lambda d, f: render.draw_message(d, W, H, args.message)
     if args.screen == "matrix":
         return lambda d, f: render.draw_matrix(d, W, H, f)
+    if args.screen == "rainclock":
+        # the rain pours over the clock, exactly like the board's rain mode
+        return lambda d, f: render.draw_rain_clock(
+            d, W, H, "21", "%02d" % (f % 60), f % 2 == 0, f)
     raise SystemExit("unknown screen: %s" % args.screen)
 
 
@@ -186,7 +190,7 @@ def main():
                          "to stdout (no escape codes)")
     ap.add_argument("--screen", default="weather",
                     choices=["weather", "clock", "hilo", "co2", "boot", "message",
-                             "matrix", "icons"])
+                             "matrix", "rainclock", "icons"])
     ap.add_argument("--code", type=int, default=61, help="WMO weather code (weather screen)")
     ap.add_argument("--temp", type=int, default=21, help="current temperature C")
     ap.add_argument("--night", action="store_true", help="weather screen: night (moon)")
