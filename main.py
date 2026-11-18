@@ -233,8 +233,6 @@ def co2_log():
     global _co2_log
     if _co2_log is None:
         # 'i': epoch seconds; 'H': ppm — the SCD41 spec range is 400..5000
-        # (note (0,)*N fills a tuple BEFORE array(); MicroPython arrays
-        # have no __mul__)
         _co2_log = [array("i", (0,) * CO2_LOG_N), array("H", (0,) * CO2_LOG_N),
                     0, 0]
     return _co2_log
