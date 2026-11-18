@@ -28,6 +28,7 @@ renders N animation ticks (frame 0..N-1); --delay sets playback seconds per fram
 """
 import argparse
 import inspect
+import math
 import os
 import sys
 import time
@@ -121,6 +122,37 @@ def frame_to_text(fb):
     return "\n".join(lines)
 
 
+# The canned CO2 room, in one place: every synthetic CO2 history in the sim
+# (the run_main measurement script, the preseed, this preview) derives from
+# co2_script_ppm — always the sin().
+
+def co2_script_ppm(i):
+    """Scripted SCD41 reading i (readings come ~15-20 s apart; 12 of them =
+    one 3-minute ring bucket at the full 15 s cadence): one slow sine
+    cycle, 900 -+ 350 ppm (550..1250) over 720 readings (~3 h), with a
+    deterministic -+2 ppm wobble so it reads like real air."""
+    wobble = ((i * 7) % 5) - 2
+    return round(900.0 + 350.0 * math.sin(2.0 * math.pi * i / 720.0)) + wobble
+
+
+CO2_READS_PER_BUCKET = 12  # co2_script_ppm readings per 3-minute slot (15 s)
+
+
+def synth_co2_hist():
+    """Synthetic ring contents for the co2 screen preview: the canned
+    room's 3-minute bucket means (one per strip column, averaged over
+    co2_script_ppm), oldest -> newest, filling the fixed ~2.6 h window.
+    Returns [(epoch_s, ppm)]."""
+    n = 53
+    rpb = CO2_READS_PER_BUCKET
+    hist = []
+    for i in range(n):
+        vals = [co2_script_ppm(rpb * i + k) for k in range(rpb)]
+        hist.append((i * render.CO2_STRIP_COL_S,
+                     (sum(vals) + rpb // 2) // rpb))
+    return hist
+
+
 def make_screen_fn(args):
     if args.screen == "weather":
         return lambda d, f: render.draw_weather(d, W, H, args.code, "%dC" % args.temp, f,
@@ -130,7 +162,9 @@ def make_screen_fn(args):
     if args.screen == "hilo":
         return lambda d, f: render.draw_hilo(d, W, H, "%d" % args.hi, "%d" % args.lo)
     if args.screen == "co2":
-        return lambda d, f: render.draw_co2(d, W, H, args.ppm)
+        hist = synth_co2_hist()
+        return lambda d, f: render.draw_co2(
+            d, W, H, args.ppm, hist=hist)
     if args.screen == "boot":
         # cycle through the real boot stages like main.py does: boot/wifi/ntp/weather
         return lambda d, f: render.draw_boot(

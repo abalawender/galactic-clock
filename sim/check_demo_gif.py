@@ -4,7 +4,8 @@
 Regenerates the demo frames from the working tree with the exact parameters of
 the README regenerate command — keep DEMO_* below in sync with:
 
-    python3 sim/run_main.py --seconds 18 --delay 0.12 --gif docs/demo-rotation.gif
+    python3 sim/run_main.py --seconds 24 --delay 0.12 --preseed-co2 53 \\\
+        --gif docs/demo-rotation.gif
 
 — then compares them with the committed GIF: frame count, size, per-frame
 duration, and decoded pixels. Pixels are compared after decoding (not raw
@@ -29,6 +30,7 @@ from gif import fb_to_image  # noqa: E402
 # keep in sync with the README regenerate command (scale is run_main's default)
 DEMO_GIF = os.path.join(REPO, "docs", "demo-rotation.gif")
 DEMO_SECONDS = 24.0  # must span a full ~20 s rotation (no matrix slot in it)
+DEMO_PRESEED_CO2 = 53  # 53 bucket means = 53 strip columns, ~2.6 h
 DEMO_DELAY_MS = 120
 DEMO_SCALE = 8
 W, H = 53, 11
@@ -86,9 +88,10 @@ def compare(frames, gif_path, scale, delay_ms):
 
 
 def check(gif_path=DEMO_GIF, seconds=DEMO_SECONDS, scale=DEMO_SCALE,
-          delay_ms=DEMO_DELAY_MS):
+          delay_ms=DEMO_DELAY_MS, preseed_co2=DEMO_PRESEED_CO2):
     """Render the demos with the current code and compare against the GIFs."""
-    problems = compare(run_main.run_current(seconds), gif_path, scale, delay_ms)
+    problems = compare(run_main.run_current(seconds, preseed_co2=preseed_co2),
+                       gif_path, scale, delay_ms)
     problems += compare_rainclock_gif()
     return problems
 
@@ -133,8 +136,8 @@ def main():
         for p in problems[:10]:
             print("  - %s" % p)
         print("regenerate with: python3 sim/run_main.py --seconds %g"
-              " --delay %g --gif docs/demo-rotation.gif"
-              % (DEMO_SECONDS, DEMO_DELAY_MS / 1000.0))
+              " --delay %g --preseed-co2 %d --gif docs/demo-rotation.gif"
+              % (DEMO_SECONDS, DEMO_DELAY_MS / 1000.0, DEMO_PRESEED_CO2))
         print("            and: python3 sim/sim.py play --screen rainclock"
               " --delay %g --gif docs/demo-rainclock.gif"
               % (RAINCLOCK_DELAY_MS / 1000.0))

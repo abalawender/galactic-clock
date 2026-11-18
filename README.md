@@ -40,7 +40,7 @@ across runs, so it always continues where it left off.
 
 The regular rotation (clock → animated weather → hi/lo → CO2), rendered by the
 host sim from the real `main.py` — regenerate with
-`python3 sim/run_main.py --seconds 24 --delay 0.12 --gif docs/demo-rotation.gif`
+`python3 sim/run_main.py --seconds 24 --delay 0.12 --preseed-co2 53 --gif docs/demo-rotation.gif`
 (needs Pillow; these GIFs are tracked, all other recordings stay uncommitted).
 
 ![Rain-clock demo](docs/demo-rainclock.gif)

@@ -44,7 +44,7 @@ CANNED_WX = {
     "current": {"temperature_2m": 21.3, "weather_code": 61},
     "daily": {"temperature_2m_max": [25.4], "temperature_2m_min": [17.6]},
 }
-CANNED_CO2 = 812  # ppm reported by the mocked SCD41 (tests override)
+CANNED_CO2 = None  # ppm pin that overrides the script below (alarm tests)
 CANNED_LIGHT = 2048.0  # gu.light() raw 0..4095 (tests override)
 SYNCED_EPOCH = 1793972928.0  # pretend NTP fixed the RTC to this
 WIFI_OK = True  # tests can set False to simulate a failed wifi connect
@@ -76,14 +76,30 @@ class FakeWLAN:
         return ("192.168.1.42", "255.255.255.0", "192.168.1.1", "1.1.1.1")
 
 
+def _co2_script():
+    """The canned SCD41 measurement script: every reading comes from
+    sim.py's single co2_script_ppm() generator — one slow sine cycle,
+    550..1250 ppm over ~3 h (720 readings, ~15-20 s apart; 12 = one
+    3-minute ring bucket at the full cadence). One reading per sequential
+    measure() call; CANNED_CO2 can pin every reading (alarm tests)."""
+    return [simmod.co2_script_ppm(i) for i in range(720)]
+
+
+CO2_SCRIPT = _co2_script()
+
+
 class FakeSCD41:
-    """Canned SCD41: CANNED_CO2 ppm, 21.5 C, 45 %RH, always ready. Last instance
-    is kept on the class so tests can introspect what main.py configured."""
+    """Mocked SCD41 serving CO2_SCRIPT sequentially (CANNED_CO2 pins every
+    reading when set). 21.5 C, 45 %RH, always ready. Last instance is kept
+    on the class so tests can introspect what main.py configured."""
     last = None
+
+    SLOT_BASE = 0  # preseeded runs start the script here (seed_co2_ring)
 
     def __init__(self, i2c, address=0x62):
         FakeSCD41.last = self
         self.altitude_m = None
+        self.slot = FakeSCD41.SLOT_BASE
 
     def start(self):
         pass
@@ -95,7 +111,11 @@ class FakeSCD41:
         return True
 
     def measure(self):
-        return CANNED_CO2, 21.5, 45.0
+        if CANNED_CO2 is not None:
+            return CANNED_CO2, 21.5, 45.0
+        ppm = CO2_SCRIPT[self.slot % len(CO2_SCRIPT)]
+        self.slot += 1
+        return ppm, 21.5, 45.0
 
 
 class _Stop(BaseException):
@@ -165,13 +185,48 @@ class FakePin:
     IRQ_FALLING = 8
 
 
+def seed_co2_ring(g, n):
+    """Fill main.py's ring namespace as if the clock had been running for a
+    while: n committed 3-minute wall-clock buckets — slot-aligned (epoch
+    // CO2_BUCKET_S) timestamps ending just before the NTP-synced epoch
+    (main() — not module level — does the sync, so seeding happens before
+    it runs and must anchor on the post-sync clock). Each bucket averages
+    the 12 scripted readings (~15 s apart at full cadence) it covers.
+    Injects "_co2_log", "_last_co2_t" and a closed "_bkt" into
+    the exec'd module namespace and advances the fake sensor's slot, so the
+    first live reading continues the cadence and the script seamlessly."""
+    from array import array as _array
+    N = g["CO2_LOG_N"]
+    BUCKET = g["CO2_BUCKET_S"]
+    READS_PER_BUCKET = BUCKET // g["CO2_INTERVAL_S"]
+    n = min(n, len(CO2_SCRIPT) // READS_PER_BUCKET, N)
+    synced = int(SYNCED_EPOCH)
+    aligned = synced - synced % BUCKET  # buckets align to the wall clock
+    means = [(sum(CO2_SCRIPT[READS_PER_BUCKET * k:
+                                   READS_PER_BUCKET * (k + 1)])
+              + READS_PER_BUCKET // 2) // READS_PER_BUCKET
+             for k in range(n)]
+    ts = _array("i", [aligned - BUCKET * (n - 1 - k) for k in range(n)]
+                + [0] * (N - n))
+    ppm = _array("H", means + [0] * (N - n))
+    g["_co2_log"] = [ts, ppm, n % N, n]
+    # the last seeded bucket closed just before "now"; the first live
+    # reading passes the cadence guard immediately and opens a live bucket
+    g["_last_co2_t"] = synced - g["CO2_INTERVAL_S"]
+    g["_bkt"] = None
+    # main() constructs the sensor only when called below
+    FakeSCD41.SLOT_BASE = READS_PER_BUCKET * n
+
+
 def run_main_src(src, seconds, render_src=None, capture_func=None,
-                 capture_out=None):
+                 capture_out=None, out_globals=None, preseed_co2=None):
     """Exec one main.py source with all externals mocked; return frame list.
 
     If capture_func is given (e.g. "draw_weather"), every call of that
     render.* function appends a copy of the bitmap to capture_out — i.e. the
     exact screen the ref's own main.py drew, with its own frame argument.
+    If out_globals is given, the exec'd namespace is copied into it after
+    the run (a test can then inspect main.py's module state).
     """
     state = {"t": BOOT_EPOCH, "start": None}
     real_time = sys.modules.get("time")
@@ -333,16 +388,26 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     # patch.dict swaps the stub modules in and restores them atomically,
     # even if the app code raises
     FakePin.fired = ()  # each app run starts with untriggered press injections
+    FakeSCD41.SLOT_BASE = 0  # each run replays the script from its start
     try:
         with mock.patch.dict(sys.modules, stubs):
-            g = {"__name__": "__main__"}
+            # a preseed run imports main.py without launching it (the
+            # __name__ guard), fills the ring with script history, then
+            # calls main() under the same mocks — the rotation then
+            # previews hours of history, not just the seconds it ran
+            g = {"__name__": "main_preseed" if preseed_co2 else "__main__"}
             try:
                 exec(compile(src, "main.py", "exec"), g)
+                if preseed_co2 and "co2_log" in g:
+                    seed_co2_ring(g, preseed_co2)
+                    g["main"]()
             except _Stop:
                 pass
     finally:
         if orig is not None:
             setattr(rmod, capture_func, orig)
+        if out_globals is not None and "gu" in g:
+            out_globals.update(g)
     # the app really did go through the mocked internet (+ RTC sync if wifi ok)
     assert urequests.get.called, "main.py never fetched weather"
     if WIFI_OK:
@@ -359,11 +424,12 @@ def run_at(ref, seconds):
     return run_main_src(src, seconds, render_src=_git_show(ref, "src/render.py"))
 
 
-def run_current(seconds):
+def run_current(seconds, out_globals=None, preseed_co2=None):
     """Frames from the working-tree main.py (its `import render` resolves normally)."""
     with open(os.path.join(REPO, "main.py")) as fh:
         src = fh.read()
-    return run_main_src(src, seconds)
+    return run_main_src(src, seconds, out_globals=out_globals,
+                        preseed_co2=preseed_co2)
 
 
 def run_screen_at(ref, func, seconds):
@@ -399,9 +465,14 @@ def main():
     ap.add_argument("--gif", default=None, help="write an animated GIF here")
     ap.add_argument("--scale", type=int, default=8)
     ap.add_argument("--delay", type=float, default=0.15)
+    ap.add_argument("--preseed-co2", type=int, default=None,
+                    help="preload the ring with N 3-minute bucket means "
+                         "(180 s apart, one per strip column) before the "
+                         "loop starts")
     args = ap.parse_args()
 
-    frames = run_at(args.ref, args.seconds) if args.ref else run_current(args.seconds)
+    frames = run_at(args.ref, args.seconds) if args.ref else run_current(
+        args.seconds, preseed_co2=args.preseed_co2)
     if frames is None:
         raise SystemExit("no main.py at ref %s" % args.ref)
     print("captured %d frames over %.1f virtual seconds" % (len(frames), args.seconds))
