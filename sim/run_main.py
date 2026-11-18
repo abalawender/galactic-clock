@@ -111,11 +111,14 @@ class FakeSCD41:
         return True
 
     def measure(self):
+        # board-faithful types (REPL-verified): measure() returns FLOATS,
+        # so the real code's int() casts are exercised by the suite — the
+        # original single-deploy ERR TYPEE lived exactly across this fork
         if CANNED_CO2 is not None:
-            return CANNED_CO2, 21.5, 45.0
+            return float(CANNED_CO2), 21.5, 45.0
         ppm = CO2_SCRIPT[self.slot % len(CO2_SCRIPT)]
         self.slot += 1
-        return ppm, 21.5, 45.0
+        return float(ppm), 21.5, 45.0
 
 
 class _Stop(BaseException):
@@ -232,9 +235,10 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
     real_time = sys.modules.get("time")
 
     fake_time = types.ModuleType("time")
-    # this MicroPython build's time.time() returns int seconds — the mock must
-    # too, or int(time.time()*3) advances differently than on the real board
-    # (jumps of 3 per second, which is what made rain appear to fall upwards)
+    # this MicroPython build's time.time() returns int seconds
+    # (REPL-verified: type(time.time()) is 'int') — the mock must too, or
+    # arithmetic advanced differently than on the real board once (which
+    # is what made rain appear to fall upwards in an early sim)
     fake_time.time = lambda: int(state["t"])
     fake_time.ticks_ms = lambda: int(state["t"] * 1000) % (1 << 30)
     fake_time.ticks_us = lambda: int(state["t"] * 1000000) % (1 << 30)
