@@ -519,6 +519,37 @@ def show_text(msg, seconds):
         time.sleep(0.2)
 
 
+def run_pass(sensor, wx):
+    """One full rotation pass, in fixed display order: the clock, the
+    weather pages, then the co2 readout. The per-screen freshness checks
+    live here (the screens themselves are pure renderers); adding a screen
+    means one line here, not a loop restructure. Keeps the pass as data:
+    (screen, args) pairs, so the sequence reviews as a unit."""
+    if rtc_trusted():
+        show_clock(5)
+    else:
+        # never NTP-synced and RTC still < 2026 (fresh boot): showing
+        # the clock would display a wrong time — message instead
+        show_text("no ntp", 5)
+    maybe_show_rain(sensor)
+    if wx is not None:
+        show_weather(wx, 5)
+        show_hilo(wx, 5)
+    else:
+        show_text("no weather", 5)
+    maybe_show_rain(sensor)
+    fresh_ppm = sample_co2(sensor)
+    hist = co2_history()
+    if _co2_ppm is not None:
+        # the number is the latest raw reading (up to 3 min fresher
+        # than the newest committed bucket — that lag lives in the
+        # strip only); the alarm fires inside show_co2 right after
+        # the first frame, so the beep overlaps the screen instead
+        # of preceding it and only rides a pass with a fresh reading
+        show_co2(_co2_ppm, 5, alarm=fresh_ppm is not None,
+                 hist=hist)
+
+
 def main():
     tick_boot("boot")
     # measure VSYS before the radio comes up (GP29 is the radio's SPI CS
@@ -566,29 +597,7 @@ def main():
                 except Exception as e:
                     print("weather fetch failed:", e)
                     wx = None
-            if rtc_trusted():
-                show_clock(5)
-            else:
-                # never NTP-synced and RTC still < 2026 (fresh boot): showing
-                # the clock would display a wrong time — message instead
-                show_text("no ntp", 5)
-            maybe_show_rain(sensor)
-            if wx is not None:
-                show_weather(wx, 5)
-                show_hilo(wx, 5)
-            else:
-                show_text("no weather", 5)
-            maybe_show_rain(sensor)
-            fresh_ppm = sample_co2(sensor)
-            hist = co2_history()
-            if _co2_ppm is not None:
-                # the number is the latest raw reading (up to 3 min fresher
-                # than the newest committed bucket — that lag lives in the
-                # strip only); the alarm fires inside show_co2 right after
-                # the first frame, so the beep overlaps the screen instead
-                # of preceding it and only rides a pass with a fresh reading
-                show_co2(_co2_ppm, 5, alarm=fresh_ppm is not None,
-                         hist=hist)
+            run_pass(sensor, wx)
             # telemetry ties to the data screens; the rain below doesn't log
             log_sys()
             # a press mid-rotation makes every show loop bail within a
