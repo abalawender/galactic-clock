@@ -758,11 +758,67 @@ def draw_hilo(d, w, h, hi_text, lo_text):
     d.text(lo_text, x2 + 3 + arrow_gap, TEXT_Y, scale=1)
 
 
-def draw_co2(d, w, h, ppm):
-    """CO2 reading in ppm as one centered text group, color-coded by level."""
+CO2_STRIP_ROW_DIM = 4  # the strip ink: value/10 of full brightness; one row
+CO2_STRIP_COL_S = 180  # one column per 3 min -> a fixed ~2.6 h window at w=53
+
+
+def _co2_line_color(ppm):
+    """The history strip's muted value hue: full level colors (green under
+    800, amber under CO2_RED_PPM, red beyond) interpolated so the strip
+    runs green -> yellow -> red along the history, then dimmed by
+    CO2_STRIP_ROW_DIM."""
+    if ppm <= CO2_WARN_PPM:
+        lo, hi, a, b = 600, CO2_WARN_PPM, CO2_OK, CO2_WARN
+    elif ppm < CO2_RED_PPM:
+        lo, hi, a, b = CO2_WARN_PPM, CO2_RED_PPM, CO2_WARN, CO2_BAD
+    else:
+        return tuple(c * CO2_STRIP_ROW_DIM // 10 for c in CO2_BAD)
+    if ppm < lo:
+        ppm = lo
+    if ppm > hi:
+        ppm = hi
+    t = (ppm - lo) * 100 // (hi - lo)
+    return tuple((a[k] + (b[k] - a[k]) * t // 100) * CO2_STRIP_ROW_DIM // 10
+                 for k in range(3))
+
+
+def _draw_co2_strip(d, w, h, hist):
+    """The history as one row along the screen's bottom edge on a FIXED
+    time scale: one column per CO2_STRIP_COL_S (3 min), newest at the
+    right, so the strip is the last ~2.6 h of the room regardless of how
+    dense the ring is. hist: [(epoch_s, ppm)] oldest -> newest, from the
+    board's ring. Each column glows the muted hue of the newest reading
+    that fell inside its bucket; buckets with no reading stay dark."""
+    row = h - 1
+    if not hist:
+        return
+    newest_t = hist[-1][0]
+    for t, ppm_h in hist:  # oldest -> newest: newer readings win a bucket
+        col = (w - 1) - (newest_t - t) // CO2_STRIP_COL_S
+        if col < 0:
+            continue  # older than the display window; the list is sorted
+        d.set_pen(d.create_pen(*_co2_line_color(ppm_h)))
+        d.pixel(col, row)
+
+
+def draw_co2(d, w, h, ppm, hist=None):
+    """The current reading in ppm. hist ([(epoch_s, ppm)] oldest -> newest,
+    from the board's ring) turns on the new layout: a horizontally+
+    vertically centered plain-white reading (the level speaks through the
+    strip's hue) over a one-row hue strip along the bottom edge — a fixed
+    ~2.6 h window, one column per CO2_STRIP_COL_S. hist=None renders
+    exactly the legacy level-colored centered screen: the call site in
+    before_after.py must work against every ref's draw_co2 signature."""
+    if hist is None:
+        text = "CO2 %d" % ppm
+        x = (w - d.measure_text(text, 1)) // 2
+        d.set_pen(d.create_pen(*co2_color(ppm)))
+        d.text(text, x, TEXT_Y, scale=1)
+        return
+    _draw_co2_strip(d, w, h, hist)
+    d.set_pen(d.create_pen(*WHITE))
     text = "CO2 %d" % ppm
     x = (w - d.measure_text(text, 1)) // 2
-    d.set_pen(d.create_pen(*co2_color(ppm)))
     d.text(text, x, TEXT_Y, scale=1)
 
 
