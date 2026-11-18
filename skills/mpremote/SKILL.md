@@ -71,3 +71,41 @@ The rest of the "default" Python (`galactic`, `picographics`,
 - `/boot.py` runs at every power-on/reset before anything else (not used).
 - `/main.py` runs at boot right after boot.py — the autostart entry point.
   No main.py present -> plain REPL at boot.
+
+## RAM persistence across resets — there is none (REPL-verified)
+
+App-state history must be rebuilt in RAM after any reset (soft reset,
+`machine.reset()`, power cycle): nothing on the RP2040 retains RAM. Modules
+are no escape hatch either, on this firmware:
+
+- `sys.<attr> = x` **raises** `AttributeError: 'module' object has no
+  attribute '<attr>'`.
+- `builtins.<attr> = x` is worse: it **silently no-ops** — no exception, but
+  a `getattr(builtins, attr, default)` in the very same script returns the
+  default (the value is never stored). A bare `try` around the assignment is
+  a false positive; always re-read the attribute to check it stuck.
+
+Verified 2026-11-18 via `scripts/attach.sh` + a probe through REPL. To
+re-verify (REPL summary: `type(time.time())`, storing into an `array('i')`):
+
+```python
+import time, array, sys, builtins
+print(type(time.time()))            # int on this build — NOT float
+a = array.array("i", (0,) * 4)
+try:
+    a[0] = 1.5                       # measure()-like float
+except Exception as e:
+    print(e)                         # TypeError: can't convert float to int
+try:
+    sys.x = 1
+except Exception as e:
+    print(e)                         # AttributeError: no attribute 'x'
+builtins.x = 1
+print(getattr(builtins, "x", None))  # None — silently dropped
+```
+
+Related board facts (same probe, same day): `breakout_scd41.measure()`
+returns floats (co2 among them), so any value destined for a `array('i')` /
+`array('H')` ring must pass `int()` first; `array` supports no repetition
+(`a * 2` raises `TypeError: unsupported types for __mul__`) — prefill via a
+tuple, `array("i", (0,) * N)`.
