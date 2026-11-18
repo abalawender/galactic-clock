@@ -257,8 +257,9 @@ def sample_co2(sensor):
     global _last_co2_t, _bkt, _co2_ppm
     if sensor is None:
         return None
-    # int: the ring's ts array('i') needs one, and this build's
-    # time.time() returns a float
+    # ints for the ring arrays: this build's time.time() is already an
+    # int, but measure() returns floats (REPL-verified) — cast anyway, a
+    # port difference must fail loudly here, not in the arrays
     now = int(time.time())
     if _last_co2_t is not None and now - _last_co2_t < CO2_INTERVAL_S:
         return None
@@ -271,8 +272,8 @@ def sample_co2(sensor):
         return None
     if co2 < 400:  # below the SCD41's spec floor = a hiccup, not air
         return None
-    # measure() returns floats on this build (the sim mocks both as ints,
-    # which is what let this reach the board)
+    # measure() returns floats on this build (REPL-verified; the sim now
+    # serves floats too, so this cast is exercised by the suite)
     co2 = int(co2)
     _co2_ppm = co2
     slot = now // CO2_BUCKET_S  # this reading's wall-clock bucket
