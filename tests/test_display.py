@@ -775,6 +775,155 @@ class TestCO2(unittest.TestCase):
                              % (ppm, lit, want))
 
 
+class TestCO2HistoryScreen(unittest.TestCase):
+    """co2 screen: white centered reading over a one-row hue strip on a
+    fixed time scale (CO2_STRIP_COL_S per column, ~2.6 h at 53 cols).
+    Pixel values are (r, g, b) tuples — truthy even when black (0,0,0);
+    emptiness must compare against the off color, any(fb[y]) is always
+    true."""
+
+    def _pairs(self, values, step):
+        return [(i * step, v) for i, v in enumerate(values)]
+
+    def test_strip_buckets_by_time_not_by_reading(self):
+        # ten readings 20 s apart cover 3.3 min -> exactly two columns
+        hist = self._pairs([800 + i for i in range(10)], 20)
+        fb = frame(lambda d, f: render._draw_co2_strip(d, W, H, hist))
+        lit = [x for x in range(W) if fb[H - 1][x] != (0, 0, 0)]
+        self.assertEqual(len(lit), 2, "20 s readings must share one bucket")
+        # the newest reading (812 vs 802 inside the same bucket) wins
+        self.assertEqual(fb[H - 1][lit[-1]],
+                         render._co2_line_color(809))
+
+    def test_strip_window_is_fixed_at_three_minutes_per_column(self):
+        # one reading per 3 min over 60 min -> 20 columns, right-aligned,
+        # independent of how many readings the ring holds
+        hist = self._pairs([800 + (i % 20) for i in range(20)],
+                           render.CO2_STRIP_COL_S)
+        fb = frame(lambda d, f: render._draw_co2_strip(d, W, H, hist))
+        lit = [x for x in range(W) if fb[H - 1][x] != (0, 0, 0)]
+        self.assertEqual(lit, list(range(W - 20, W)))
+
+    def test_strip_drops_readings_older_than_the_window(self):
+        # 5 h of history at 60 s cadence = 300 readings: only the newest
+        # 53 columns' worth stay, older ones silently fall off the left
+        hist = self._pairs([800 + i % 10 for i in range(300)], 60)
+        fb = frame(lambda d, f: render._draw_co2_strip(d, W, H, hist))
+        lit = [x for x in range(W) if fb[H - 1][x] != (0, 0, 0)]
+        self.assertEqual(lit, list(range(W)),
+                         "the fixed window must fill all 53 columns")
+
+    def test_strip_single_row_of_muted_value_hues(self):
+        hist = self._pairs([600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400],
+                           render.CO2_STRIP_COL_S)
+        fb = frame(lambda d, f: render._draw_co2_strip(d, W, H, hist))
+        for x in range(W - len(hist), W):
+            above = [y for y in range(H - 1) if fb[y][x] != (0, 0, 0)]
+            self.assertEqual(above, [],
+                             "strip leaked above the bottom row at %d" % x)
+            i = x - (W - len(hist))
+            self.assertEqual(fb[H - 1][x], render._co2_line_color(hist[i][1]),
+                             "column %d does not carry its value's muted "
+                             "hue" % x)
+
+    def test_strip_hue_walks_green_to_red(self):
+        # the hue walks green -> yellow -> red and its stops align with the
+        # level thresholds: 600 ppm muted green, 800 muted amber, 1200 red
+        for value, stop in ((600, render.CO2_OK),
+                            (800, render.CO2_WARN),
+                            (1200, render.CO2_BAD)):
+            fb = frame(lambda d, f: render._draw_co2_strip(
+                d, W, H, [(0, value)]))
+            want = tuple(v * render.CO2_STRIP_ROW_DIM // 10 for v in stop)
+            self.assertEqual(fb[H - 1][W - 1], want,
+                             "%d ppm strip hue mismatch" % value)
+
+    def test_text_wins_over_the_strip_below_it(self):
+        # the strip lives on the bottom row only, so the centered white
+        # reading mixes with nothing at all above it
+        hist = self._pairs([800 + k * 8 for k in range(60)],
+                           render.CO2_STRIP_COL_S // 3)
+        fb = frame(lambda d, f: render.draw_co2(d, W, H, 812, hist=hist))
+        for y in range(H - 1):
+            for x in range(W):
+                self.assertIn(fb[y][x], ((0, 0, 0), render.WHITE),
+                              "garbled middle rows at %d,%d" % (x, y))
+        strip_px = [fb[H - 1][x] for x in range(W) if fb[H - 1][x] != (0, 0, 0)]
+        self.assertTrue(strip_px, "strip lost")
+
+    def test_reading_is_vertically_centered_and_white(self):
+        hist = self._pairs([800 + k for k in range(30)],
+                           render.CO2_STRIP_COL_S // 3)
+        fb = frame(lambda d, f: render.draw_co2(d, W, H, 858, hist=hist))
+        white_rows = set(y for y in range(H) for x in range(W)
+                         if fb[y][x] == render.WHITE)
+        # 6-tall glyphs at TEXT_Y=2: ink rows balance around the mid row
+        self.assertEqual(min(white_rows) + max(white_rows), 2 * (H // 2),
+                         "reading not vertically centered around row %d"
+                         % (H // 2,))
+
+
+class TestCO2Ring(unittest.TestCase):
+    """The in-RAM CO2 ring: 3-minute bucket means, fed by the mocked
+    rotation, while the big readout tracks every raw reading."""
+
+    def test_rotation_commits_bucket_means_every_three_minutes(self):
+        run_main.CANNED_CO2 = 1000  # pin so each bucket mean is exact
+        try:
+            out = {}
+            run_main.run_current(470.0, out_globals=out)
+        finally:
+            run_main.CANNED_CO2 = None
+        ts, vals, head, count = out["_co2_log"]
+        self.assertGreaterEqual(count, 2,
+                                "470 s of rotation committed <2 buckets")
+        self.assertEqual([v for v in vals[:count]], [1000] * count,
+                         "ring entries must be bucket means, not raw tags")
+        start = (head - count) % len(ts)
+        pair = [(ts[(start + k) % len(ts)], vals[(start + k) % len(vals)])
+                for k in range(count)]
+        gaps = [pair[i + 1][0] - pair[i][0] for i in range(count - 1)]
+        self.assertTrue(
+            all(g % out["CO2_BUCKET_S"] == 0 and g >= out["CO2_BUCKET_S"]
+                for g in gaps),
+            "committed buckets off the wall-clock grid: %s" % (gaps,))
+
+    def test_readout_tracks_raw_reads_before_first_bucket(self):
+        run_main.CANNED_CO2 = 1111
+        try:
+            out = {}
+            run_main.run_current(40.0, out_globals=out)
+        finally:
+            run_main.CANNED_CO2 = None
+        _ts, _vals, _head, count = out["_co2_log"]
+        self.assertEqual(count, 0, "a bucket committed inside 180 s")
+        self.assertEqual(out["_co2_ppm"], 1111,
+                         "the live readout missed the raw reading")
+
+    def test_preseeded_ring_starts_with_history(self):
+        out = {}
+        run_main.run_current(30.0, out_globals=out, preseed_co2=10)
+        ts, vals, head, count = out["_co2_log"]
+        self.assertEqual(count, 10, "no new bucket commits inside 180 s")
+        start = (head - count) % len(ts)
+        self.assertEqual([vals[(start + k) % len(vals)] for k in range(count)],
+                         [(sum(run_main.CO2_SCRIPT[12 * k:12 * k + 12]) + 6)
+                          // 12 for k in range(count)],
+                         "preseed must store 12-reading bucket means")
+        synced = int(run_main.SYNCED_EPOCH)
+        self.assertEqual([ts[(start + k) % len(ts)] for k in range(count)],
+                         [synced - synced % out["CO2_BUCKET_S"]
+                          - out["CO2_BUCKET_S"] * (count - 1 - k)
+                          for k in range(count)],
+                         "preseed buckets off the wall-clock slot grid")
+
+    def test_fresh_boot_starts_an_empty_ring(self):
+        out = {}
+        run_main.run_current(1.0, out_globals=out)
+        # lazy init: not even allocated before the first rotation pass
+        self.assertFalse(out["_co2_log"], "ring pre-allocated at boot")
+
+
 GOLDEN_BOOT_WIFI_F0 = (
     '                                                     \n'
     '                                                     \n'
@@ -939,7 +1088,7 @@ class TestRunMainMocked(unittest.TestCase):
         try:
             run_main.run_current(22.0)
         finally:
-            run_main.CANNED_CO2 = 812
+            run_main.CANNED_CO2 = None
             run_main.CANNED_LIGHT = 2048.0
         self.assertGreater(run_main.FakeChannel.beeps, 0, "no alarm beep")
 
@@ -952,7 +1101,7 @@ class TestRunMainMocked(unittest.TestCase):
             try:
                 run_main.run_current(22.0)
             finally:
-                run_main.CANNED_CO2 = 812
+                run_main.CANNED_CO2 = None
                 run_main.CANNED_LIGHT = 2048.0
             self.assertEqual(run_main.FakeChannel.beeps, 0,
                              "alarm beeped at ALS=%s (dark)" % light)
@@ -966,7 +1115,7 @@ class TestRunMainMocked(unittest.TestCase):
             try:
                 run_main.run_current(22.0)
             finally:
-                run_main.CANNED_CO2 = 812
+                run_main.CANNED_CO2 = None
                 run_main.CANNED_LIGHT = 2048.0
             self.assertEqual(run_main.FakeChannel.beeps > 0, want_beeps,
                              "ALS=%s beeps=%s want %s"
@@ -979,7 +1128,7 @@ class TestRunMainMocked(unittest.TestCase):
         try:
             run_main.run_current(22.0)
         finally:
-            run_main.CANNED_CO2 = 812
+            run_main.CANNED_CO2 = None
             run_main.CANNED_LIGHT = 2048.0
         self.assertEqual(run_main.FakeChannel.beeps, 0)
 
@@ -994,7 +1143,7 @@ class TestRunMainMocked(unittest.TestCase):
             try:
                 run_main.run_current(22.0)
             finally:
-                run_main.CANNED_CO2 = 812
+                run_main.CANNED_CO2 = None
                 run_main.CANNED_LIGHT = 2048.0
             self.assertEqual(run_main.FakeChannel.beeps > 0, want_beeps,
                              "ppm=%s beeps=%s want %s"
