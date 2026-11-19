@@ -16,8 +16,8 @@ hi/lo screen.
 - The SCD41 driver is frozen into Pimoroni's MicroPython firmware
   (`breakout_scd41`, `pimoroni_i2c`) — do not vendor a copy; the sim mocks
   those two modules (sim/run_main.py).
-- Deploy only `main.py`, `src/render.py`, `src/tz.py`, `src/co2.py` and
-  `src/weather.py` to the flash root.
+- The board runs `main.py` plus the modules `scripts/deploy.sh` uploads
+  (the manifest there is the single source of truth — flash root only).
 
 ## Workflow
 
@@ -26,8 +26,8 @@ hi/lo screen.
   Windows boot, as admin; re-attach after every `mpremote reset`). Board
   shows up as `/dev/ttyACM0`. If missing/unresponsive:
   `skills/mpremote/SKILL.md`.
-- Deploy: `scripts/deploy.sh` → uploads `main.py`, `src/render.py`,
-  `src/tz.py`, `src/co2.py`, `src/weather.py`, then `mpremote reset`. It
+- Deploy: `scripts/deploy.sh` → uploads everything on its manifest
+  (`main.py` + the `src/` services), then `mpremote reset`. It
   fails fast with
   the attach hint if the board is not usbipd-attached (`/dev/ttyACM0` missing).
   File management: `skills/mpremote/SKILL.md`. One-off display snippets:

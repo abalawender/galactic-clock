@@ -171,8 +171,8 @@ python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
   fully mocked run of the real `main.py`
 - Preview every display change in `sim/` before deploying (above)
 - Deploy: `scripts/deploy.sh` — attaches the board first if `/dev/ttyACM0` is
-  missing (see Connect above), uploads `main.py` + `src/render.py` +
-  `src/tz.py` + `src/co2.py` + `src/weather.py`, then resets the board
+  missing (see Connect above), uploads the modules on its manifest
+  (`main.py` + the `src/` services), then resets the board
 - PRs to `micropython` that touch `main.py`/`src/`/`sim/`/`tests/` run the tests
   and post before/after GIFs inline on the PR — see `.github/workflows/pr-sim.yml`
 - `micropython-check` (`.github/workflows/micropython-check.yml`) runs on PRs to
