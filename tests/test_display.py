@@ -13,6 +13,7 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "src"))
 sys.path.insert(0, os.path.join(REPO, "sim"))
 
+import co2  # noqa: E402  (the headline constants live with the ring now)
 import render  # noqa: E402
 import run_main  # noqa: E402
 import sim as simmod  # noqa: E402
@@ -874,17 +875,16 @@ class TestCO2Ring(unittest.TestCase):
             run_main.run_current(470.0, out_globals=out)
         finally:
             run_main.CANNED_CO2 = None
-        ts, vals, head, count = out["_co2_log"]
-        self.assertGreaterEqual(count, 2,
+        ring = out["co2"]
+        self.assertGreaterEqual(len(ring.history()), 2,
                                 "470 s of rotation committed <2 buckets")
-        self.assertEqual([v for v in vals[:count]], [1000] * count,
+        self.assertEqual([ppm for _, ppm in ring.history()],
+                         [1000] * len(ring.history()),
                          "ring entries must be bucket means, not raw tags")
-        start = (head - count) % len(ts)
-        pair = [(ts[(start + k) % len(ts)], vals[(start + k) % len(vals)])
-                for k in range(count)]
-        gaps = [pair[i + 1][0] - pair[i][0] for i in range(count - 1)]
+        ts = [t for t, _ in ring.history()]
+        gaps = [ts[i + 1] - ts[i] for i in range(len(ts) - 1)]
         self.assertTrue(
-            all(g % out["CO2_BUCKET_S"] == 0 and g >= out["CO2_BUCKET_S"]
+            all(g % co2.CO2_BUCKET_S == 0 and g >= co2.CO2_BUCKET_S
                 for g in gaps),
             "committed buckets off the wall-clock grid: %s" % (gaps,))
 
@@ -895,33 +895,33 @@ class TestCO2Ring(unittest.TestCase):
             run_main.run_current(40.0, out_globals=out)
         finally:
             run_main.CANNED_CO2 = None
-        _ts, _vals, _head, count = out["_co2_log"]
-        self.assertEqual(count, 0, "a bucket committed inside 180 s")
-        self.assertEqual(out["_co2_ppm"], 1111,
+        ring = out["co2"]
+        self.assertEqual(len(ring.history()), 0, "a bucket committed inside 180 s")
+        self.assertEqual(ring.current(), 1111,
                          "the live readout missed the raw reading")
 
     def test_preseeded_ring_starts_with_history(self):
         out = {}
         run_main.run_current(30.0, out_globals=out, preseed_co2=10)
-        ts, vals, head, count = out["_co2_log"]
-        self.assertEqual(count, 10, "no new bucket commits inside 180 s")
-        start = (head - count) % len(ts)
-        self.assertEqual([vals[(start + k) % len(vals)] for k in range(count)],
+        ring = out["co2"]
+        self.assertEqual(len(ring.history()), 10, "no new bucket commits inside 180 s")
+        self.assertEqual([ppm for _, ppm in ring.history()],
                          [(sum(run_main.CO2_SCRIPT[12 * k:12 * k + 12]) + 6)
-                          // 12 for k in range(count)],
+                          // 12 for k in range(len(ring.history()))],
                          "preseed must store 12-reading bucket means")
         synced = int(run_main.SYNCED_EPOCH)
-        self.assertEqual([ts[(start + k) % len(ts)] for k in range(count)],
-                         [synced - synced % out["CO2_BUCKET_S"]
-                          - out["CO2_BUCKET_S"] * (count - 1 - k)
-                          for k in range(count)],
+        self.assertEqual([t for t, _ in ring.history()],
+                         [synced - synced % co2.CO2_BUCKET_S
+                          - co2.CO2_BUCKET_S * (len(ring.history()) - 1 - k)
+                          for k in range(len(ring.history()))],
                          "preseed buckets off the wall-clock slot grid")
 
     def test_fresh_boot_starts_an_empty_ring(self):
         out = {}
         run_main.run_current(1.0, out_globals=out)
-        # lazy init: not even allocated before the first rotation pass
-        self.assertFalse(out["_co2_log"], "ring pre-allocated at boot")
+        # the ring exists (imported with main.py) but holds no readings:
+        # nothing is sampled before the first rotation pass commits one
+        self.assertEqual(out["co2"].history(), [], "ring not empty at boot")
 
 
 GOLDEN_BOOT_WIFI_F0 = (

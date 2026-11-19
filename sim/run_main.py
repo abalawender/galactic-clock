@@ -36,6 +36,7 @@ sys.path.insert(0, HERE)
 
 import sim as simmod  # noqa: E402
 import render as _render  # noqa: E402
+import co2 as co2mod  # noqa: E402  (real module: clock is injected, so safe here)
 from gif import write_gif  # noqa: E402
 
 W, H = 53, 11
@@ -189,34 +190,25 @@ class FakePin:
 
 
 def seed_co2_ring(g, n):
-    """Fill main.py's ring namespace as if the clock had been running for a
-    while: n committed 3-minute wall-clock buckets — slot-aligned (epoch
-    // CO2_BUCKET_S) timestamps ending just before the NTP-synced epoch
-    (main() — not module level — does the sync, so seeding happens before
-    it runs and must anchor on the post-sync clock). Each bucket averages
-    the 12 scripted readings (~15 s apart at full cadence) it covers.
-    Injects "_co2_log", "_last_co2_t" and a closed "_bkt" into
-    the exec'd module namespace and advances the fake sensor's slot, so the
-    first live reading continues the cadence and the script seamlessly."""
-    from array import array as _array
-    N = g["CO2_LOG_N"]
-    BUCKET = g["CO2_BUCKET_S"]
-    READS_PER_BUCKET = BUCKET // g["CO2_INTERVAL_S"]
-    n = min(n, len(CO2_SCRIPT) // READS_PER_BUCKET, N)
+    """Fill main.py's co2 ring with n committed 3-minute wall-clock buckets
+    — slot-aligned (ts//CO2_BUCKET_S) timestamps ending just before the
+    NTP-synced epoch (main() — not module level — does the sync, so
+    seeding happens after main.py's exec but before main() runs and must
+    anchor on the post-sync clock). Each bucket averages the 12 scripted
+    readings (~15 s apart at full cadence) it covers. The ring's own
+    restore() does the storing, so the seed rides exactly the same entry
+    path a live reading would. The sensor then carries on from the same
+    script position: its live readings continue the history seamlessly."""
+    READS_PER_BUCKET = co2mod.CO2_BUCKET_S // co2mod.CO2_INTERVAL_S
+    n = min(n, len(CO2_SCRIPT) // READS_PER_BUCKET, co2mod.CO2_LOG_N)
     synced = int(SYNCED_EPOCH)
-    aligned = synced - synced % BUCKET  # buckets align to the wall clock
+    aligned = synced - synced % co2mod.CO2_BUCKET_S  # buckets align to the wall clock
     means = [(sum(CO2_SCRIPT[READS_PER_BUCKET * k:
                                    READS_PER_BUCKET * (k + 1)])
               + READS_PER_BUCKET // 2) // READS_PER_BUCKET
              for k in range(n)]
-    ts = _array("i", [aligned - BUCKET * (n - 1 - k) for k in range(n)]
-                + [0] * (N - n))
-    ppm = _array("H", means + [0] * (N - n))
-    g["_co2_log"] = [ts, ppm, n % N, n]
-    # the last seeded bucket closed just before "now"; the first live
-    # reading passes the cadence guard immediately and opens a live bucket
-    g["_last_co2_t"] = synced - g["CO2_INTERVAL_S"]
-    g["_bkt"] = None
+    ts = [aligned - co2mod.CO2_BUCKET_S * (n - 1 - k) for k in range(n)]
+    g["co2"].restore([(t, m) for t, m in zip(ts, means)])
     # main() constructs the sensor only when called below
     FakeSCD41.SLOT_BASE = READS_PER_BUCKET * n
 
@@ -402,7 +394,7 @@ def run_main_src(src, seconds, render_src=None, capture_func=None,
             g = {"__name__": "main_preseed" if preseed_co2 else "__main__"}
             try:
                 exec(compile(src, "main.py", "exec"), g)
-                if preseed_co2 and "co2_log" in g:
+                if preseed_co2 and "co2" in g:
                     seed_co2_ring(g, preseed_co2)
                     g["main"]()
             except _Stop:
