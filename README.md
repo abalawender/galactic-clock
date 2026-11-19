@@ -171,8 +171,8 @@ python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
   fully mocked run of the real `main.py`
 - Preview every display change in `sim/` before deploying (above)
 - Deploy: `scripts/deploy.sh` — attaches the board first if `/dev/ttyACM0` is
-  missing (see Connect above), uploads `main.py` + `src/render.py` + `src/tz.py`,
-  then resets the board
+  missing (see Connect above), uploads `main.py` + `src/render.py` +
+  `src/tz.py` + `src/co2.py` + `src/weather.py`, then resets the board
 - PRs to `micropython` that touch `main.py`/`src/`/`sim/`/`tests/` run the tests
   and post before/after GIFs inline on the PR — see `.github/workflows/pr-sim.yml`
 - `micropython-check` (`.github/workflows/micropython-check.yml`) runs on PRs to
@@ -192,7 +192,7 @@ python3 sim/before_after.py --ref origin/micropython --out /tmp/pr
   bitmap6 font metrics), `run_main.py` (mocked full run of `main.py`),
   `before_after.py` (PR review GIFs), `gif.py` (Pillow writer)
 - `tests/` — unittest suite (bitmaps, golden ASCII, tz rules, mocked main loop)
-- `scripts/` — attach.sh, deploy.sh (uploads `main.py` + `render.py` + `tz.py`, resets board)
+- `scripts/` — attach.sh, deploy.sh (uploads the board sources, resets board)
 - `skills/` — agent skills: board access via mpremote (attach/recovery, REPL
   rules, flash files) in `mpremote`; the Galactic Unicorn board itself (LED
   matrix display snippets, frozen `galactic` synth API) in `unicorn`

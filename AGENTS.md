@@ -16,16 +16,19 @@ hi/lo screen.
 - The SCD41 driver is frozen into Pimoroni's MicroPython firmware
   (`breakout_scd41`, `pimoroni_i2c`) — do not vendor a copy; the sim mocks
   those two modules (sim/run_main.py).
-- Deploy only `main.py`, `src/render.py` and `src/tz.py` to the flash root.
+- Deploy only `main.py`, `src/render.py`, `src/tz.py`, `src/co2.py` and
+  `src/weather.py` to the flash root.
 
 ## Workflow
 
-- Board attach (Windows host + WSL2, usbipd): `scripts/attach.sh` (once per
-  boot on Windows: `usbipd bind --busid 2-2` as admin). Board shows up as
-  `/dev/ttyACM0`. If missing/unresponsive: `skills/mpremote/SKILL.md`.
-- Deploy: `scripts/deploy.sh` → `mpremote cp main.py :main.py`,
-  `mpremote cp src/render.py :render.py`, `mpremote cp src/tz.py :tz.py`,
-  `mpremote reset`. It fails fast with
+- Board attach (Windows host + WSL2, usbipd): `scripts/attach.sh` (busid
+  auto-detected by USB vendor 2e8a; `usbipd bind <busid>` is needed once per
+  Windows boot, as admin; re-attach after every `mpremote reset`). Board
+  shows up as `/dev/ttyACM0`. If missing/unresponsive:
+  `skills/mpremote/SKILL.md`.
+- Deploy: `scripts/deploy.sh` → uploads `main.py`, `src/render.py`,
+  `src/tz.py`, `src/co2.py`, `src/weather.py`, then `mpremote reset`. It
+  fails fast with
   the attach hint if the board is not usbipd-attached (`/dev/ttyACM0` missing).
   File management: `skills/mpremote/SKILL.md`. One-off display snippets:
   `skills/unicorn/`.
