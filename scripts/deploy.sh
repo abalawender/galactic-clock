@@ -36,7 +36,8 @@ mpremote cp src/render.py :render.py
 mpremote cp src/tz.py :tz.py
 mpremote cp src/co2.py :co2.py
 mpremote cp src/weather.py :weather.py
-echo "deployed main.py + render.py + tz.py + co2.py + weather.py (breakout_scd41 is frozen in the firmware)"
+mpremote cp src/ntp.py :ntp.py
+echo "deployed main.py + render.py + tz.py + co2.py + weather.py + ntp.py (breakout_scd41 is frozen in the firmware)"
 
 if [[ "$NO_RESET" == 0 ]]; then
   mpremote reset   # reboots into /main.py

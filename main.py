@@ -47,6 +47,7 @@ except ImportError:
 import render
 import tz
 from co2 import Co2Ring
+from ntp import NTP_INTERVAL_S, NTP_RETRY_S, NtpSync
 from weather import Weather
 
 RTC_TRUST_YEAR = 2026  # an unsynced RP2040 RTC boots at 2021-01-01; a synced one is >= 2026
@@ -473,6 +474,10 @@ def main():
     except Exception as e:
         print("scd41 init failed:", e)
     weather = Weather(LOCATION_LAT, LOCATION_LON, TZ)
+    # re-syncs the RTC every 6 h while the clock runs; a boot sync that
+    # failed only defers the first in-loop attempt by the back-off, not
+    # a full interval (the clock slot must not blank for hours)
+    ntp_svc = NtpSync(NTP_RETRY_S if not ntp_synced else NTP_INTERVAL_S)
     while True:
         # one bad iteration must not kill the clock (a dead loop = blank
         # matrix); show the error and keep rotating
@@ -493,6 +498,10 @@ def main():
                                                 WMO.get(cur["weather_code"], "?")))
             else:
                 wx = weather.current()
+            if wlan is not None and wlan.isconnected():
+                # a synced RTC drifts and DST rolls over — re-sync on a
+                # slow cadence, not only at boot/reconnect
+                ntp_svc.sync_if_due(time)
             run_pass(sensor, wx)
             # telemetry ties to the data screens; the rain below doesn't log
             log_sys()
