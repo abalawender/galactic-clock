@@ -28,7 +28,6 @@ Deploy with scripts/deploy.sh (mpremote cp main.py + render.py :).
 """
 import gc
 import time
-from array import array
 
 import network
 import ntptime
@@ -49,6 +48,7 @@ except ImportError:
 
 import render
 import tz
+from co2 import Co2Ring
 
 WX_URL = "https://api.open-meteo.com/v1/forecast"
 REFRESH_S = 600
@@ -221,88 +221,10 @@ def show_hilo(wx, seconds):
 
 
 # --- CO2 history ring (in-RAM) -----------------------------------------------
+# The ring itself (bucket math, slot logic, the raw-reading cache) lives in
+# co2.py; main.py only owns the single instance.
 
-_co2_log = None
-
-
-def co2_log():
-    """The reading ring [ts array, ppm array, head, count], in RAM only:
-    a soft reset (Ctrl-D, deploy.sh's mpremote reset) or a power cycle
-    re-executes main.py and starts a fresh ring — nothing on the RP2040
-    retains RAM across resets (RTC memory is not a thing here)."""
-    global _co2_log
-    if _co2_log is None:
-        # 'i': epoch seconds; 'H': ppm — the SCD41 spec range is 400..5000
-        _co2_log = [array("i", (0,) * CO2_LOG_N), array("H", (0,) * CO2_LOG_N),
-                    0, 0]
-    return _co2_log
-
-
-_last_co2_t = None  # epoch of the last logged reading this run
-_bkt = None         # open bucket [slot, ppm sum, reads]; slot = epoch // CO2_BUCKET_S
-_co2_ppm = None     # latest raw reading: the big readout's number
-
-
-def sample_co2(sensor):
-    """Read the SCD41, feeding the big readout with every raw reading and
-    the history ring with one mean per CO2_BUCKET_S. Cadence: no more than
-    one reading per CO2_INTERVAL_S (this runs once per rotation pass AND
-    per rain frame). Buckets are strict wall-clock slots: each reading
-    averages into the 3-minute slot its epoch falls in (the entry's ts is
-    the slot's start), so a late reading after a gap opens a fresh slot
-    instead of joining a stale bucket and unsampled slots store nothing —
-    12 readings per entry at full cadence. Returns the freshly read ppm,
-    or None when nothing was read. A failed read only skips a sample —
-    the rotation must not die for a hiccup."""
-    global _last_co2_t, _bkt, _co2_ppm
-    if sensor is None:
-        return None
-    # ints for the ring arrays: this build's time.time() is already an
-    # int, but measure() returns floats (REPL-verified) — cast anyway, a
-    # port difference must fail loudly here, not in the arrays
-    now = int(time.time())
-    if _last_co2_t is not None and now - _last_co2_t < CO2_INTERVAL_S:
-        return None
-    if not sensor.ready():
-        return None
-    try:
-        co2, _temp, _rh = sensor.measure()
-    except Exception as e:
-        print("scd41 read failed:", e)
-        return None
-    if co2 < 400:  # below the SCD41's spec floor = a hiccup, not air
-        return None
-    # measure() returns floats on this build (REPL-verified; the sim now
-    # serves floats too, so this cast is exercised by the suite)
-    co2 = int(co2)
-    _co2_ppm = co2
-    slot = now // CO2_BUCKET_S  # this reading's wall-clock bucket
-    if _bkt is not None and slot != _bkt[0]:
-        state = co2_log()  # commit the closed slot's bucket
-        state[0][state[2]] = _bkt[0] * CO2_BUCKET_S
-        # rounded mean, integer math (the ring's ppm array needs ints)
-        n = _bkt[2]
-        state[1][state[2]] = (_bkt[1] + n // 2) // n
-        state[2] = (state[2] + 1) % CO2_LOG_N    # head: next write slot
-        state[3] = min(state[3] + 1, CO2_LOG_N)  # count: filled slots
-        _bkt = None
-    if _bkt is None:
-        _bkt = [slot, 0, 0]
-    _bkt[1] += co2
-    _bkt[2] += 1
-    _last_co2_t = now
-    return co2
-
-
-def co2_history():
-    """Committed 3-minute bucket means oldest -> newest as [(epoch_s, ppm)]
-    over exactly the filled slots; the co2 screen's hue strip consumes
-    this (one entry per strip column)."""
-    state = co2_log()
-    head, count = state[2], state[3]
-    start = (head - count) % CO2_LOG_N
-    return [(state[0][(start + k) % CO2_LOG_N],
-             state[1][(start + k) % CO2_LOG_N]) for k in range(count)]
+co2 = Co2Ring()
 
 
 def show_co2(ppm, seconds, alarm=False, hist=None):
@@ -403,7 +325,7 @@ def maybe_show_rain(sensor=None):
     fade = 0
     dissolve = 0
     while True:
-        sample_co2(sensor)  # cadence guard: rain may never starve the ring
+        co2.sample(sensor, time)  # cadence guard: rain may never starve the ring
         past_deadline = time.time() >= matrix_deadline
         if past_deadline:
             # latch the exit: until the dissolve has finished, a press (or a
@@ -538,15 +460,15 @@ def run_pass(sensor, wx):
     else:
         show_text("no weather", 5)
     maybe_show_rain(sensor)
-    fresh_ppm = sample_co2(sensor)
-    hist = co2_history()
-    if _co2_ppm is not None:
+    fresh_ppm = co2.sample(sensor, time)
+    hist = co2.history()
+    if co2.current() is not None:
         # the number is the latest raw reading (up to 3 min fresher
         # than the newest committed bucket — that lag lives in the
         # strip only); the alarm fires inside show_co2 right after
         # the first frame, so the beep overlaps the screen instead
         # of preceding it and only rides a pass with a fresh reading
-        show_co2(_co2_ppm, 5, alarm=fresh_ppm is not None,
+        show_co2(co2.current(), 5, alarm=fresh_ppm is not None,
                  hist=hist)
 
 
