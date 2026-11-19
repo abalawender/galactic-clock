@@ -31,8 +31,6 @@ import time
 
 import network
 import ntptime
-import urequests
-import ujson
 from machine import ADC, Pin
 from breakout_scd41 import BreakoutSCD41  # frozen into Pimoroni's MicroPython
 from pimoroni_i2c import PimoroniI2C
@@ -49,20 +47,10 @@ except ImportError:
 import render
 import tz
 from co2 import Co2Ring
+from weather import Weather
 
-WX_URL = "https://api.open-meteo.com/v1/forecast"
-REFRESH_S = 600
 RTC_TRUST_YEAR = 2026  # an unsynced RP2040 RTC boots at 2021-01-01; a synced one is >= 2026
 WIFI_RETRY_S = 60      # retry a failed/dropped wifi connect at most this often
-
-# CO2 history ring: an in-RAM log of (epoch_s, ppm) 3-minute bucket means
-# (see sample_co2), shown on the co2 screen as a one-row hue strip. Not
-# persistent: a reset/power cycle starts a fresh ring.
-CO2_INTERVAL_S = 15  # never poll the SCD41 faster than this
-# (every loop path polls here at least once per ~20 s rotation — rain
-# included — so there is no second constant to enforce)
-CO2_BUCKET_S = 180  # one strip column = one averaged ring entry (3 min)
-CO2_LOG_N = 64      # ring slots: ~3.2 h of bucket means, 384 bytes total
 
 # Button A toggles the matrix rain. The pin comes from the frozen galactic
 # class — the board's buttons are NOT GP6/7/8/9 (A=0, B=1, C=3, D=6; verified
@@ -162,18 +150,6 @@ def connect_wifi():
             time.sleep(1)
     print("rtc synced" if ntp_synced else "ntp sync failed", "epoch:", time.time())
     return wlan
-
-
-def fetch_weather():
-    url = ("%s?latitude=%s&longitude=%s"
-           "&current=temperature_2m,weather_code,is_day"
-           "&daily=temperature_2m_max,temperature_2m_min"
-           "&timezone=%s&forecast_days=1"
-           % (WX_URL, LOCATION_LAT, LOCATION_LON, TZ.replace("/", "%2F")))
-    r = urequests.get(url)
-    if r.status_code != 200:
-        raise RuntimeError("weather http %d" % r.status_code)
-    return ujson.loads(r.content)
 
 
 def show_weather(wx, seconds):
@@ -496,8 +472,7 @@ def main():
             print("scd41: not found on i2c")
     except Exception as e:
         print("scd41 init failed:", e)
-    wx = None
-    last_fetch = 0.0
+    weather = Weather(LOCATION_LAT, LOCATION_LON, TZ)
     while True:
         # one bad iteration must not kill the clock (a dead loop = blank
         # matrix); show the error and keep rotating
@@ -508,17 +483,16 @@ def main():
                 # connect re-runs NTP (connect_wifi latches ntp_synced)
                 last_wifi_try = time.time()
                 wlan = connect_wifi()
-            if wx is None or time.time() - last_fetch > REFRESH_S:
-                tick_boot("weather")
-                try:
-                    wx = fetch_weather()
-                    last_fetch = time.time()
+            if weather.due():
+                tick_boot("weather")  # spinner up while urequests blocks
+            if weather.refresh_if_due():
+                wx = weather.current()
+                if wx is not None:
                     cur = wx["current"]
                     print("weather: %dC %s" % (round(cur["temperature_2m"]),
                                                 WMO.get(cur["weather_code"], "?")))
-                except Exception as e:
-                    print("weather fetch failed:", e)
-                    wx = None
+            else:
+                wx = weather.current()
             run_pass(sensor, wx)
             # telemetry ties to the data screens; the rain below doesn't log
             log_sys()
