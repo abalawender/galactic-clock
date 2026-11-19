@@ -9,3 +9,6 @@ frames/
 *.gif
 !docs/demo-rotation.gif
 !docs/demo-rainclock.gif
+
+# local design references (not for the repo)
+docs/reference/
