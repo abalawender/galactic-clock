@@ -22,8 +22,11 @@ Running `mpremote exec ...` takes over the REPL and **stops the running
 Use when `/dev/ttyACM0` is missing or the REPL is unresponsive.
 
 Fast path first: `ls /dev/ttyACM0` — if missing, run `scripts/attach.sh`
-(which is just `usbipd.exe attach --wsl --busid 2-2`; `scripts/deploy.sh`
-auto-runs it too). Verify the REPL answers with `mpremote exec "print('ok')"`
+(auto-detects the busid by USB vendor 2e8a; `scripts/deploy.sh` auto-runs it
+too). **Every `mpremote reset` re-enumerates the USB device and drops the
+wsL attach** — after any reset, re-run `scripts/attach.sh` before the next
+command that touches `/dev/ttyACM0`. Verify the REPL answers with
+`mpremote exec "print('ok')"`
 — remember this halts `main.py` (fine in recovery; reset afterwards). Only
 if attach fails or the REPL stays silent, work through the manual recovery
 below:
@@ -51,7 +54,8 @@ Prerequisite: board attached to WSL2 (see above). Use `mpremote`:
 - run file:  `mpremote run local.py`
 - upload:    `mpremote cp local.py :main.py`
 - download:  `mpremote cp :main.py local.py`
-- reboot:    `mpremote reset`  (reboots into `/main.py`)
+- reboot:    `mpremote reset`  (reboots into `/main.py` — this drops the
+  WSL usbipd attach; re-run `scripts/attach.sh` before the next command)
 
 Files on the flash: `/main.py` (autostart), `/render.py`, `/tz.py` — exactly
 what `scripts/deploy.sh` uploads. `/secrets.py` holds WiFi credentials and

@@ -13,6 +13,13 @@ src/render.py, that version is loaded as the `render` module, so each side is
 self-consistent. Nothing app-level is hard-coded here, which is what makes
 this robust to significant screen changes.
 
+Gotcha (burned once, in the co2 extraction): a host-side import of a board
+module — including inside this harness — binds the REAL `time`, not the
+mock, because `sys.modules` caches it outside the stub window. Any `src/`
+module that needs the clock must therefore take it injected (see
+`Co2Ring.sample(sensor, t)`); do not `import time` inside a `src/` service
+and trust it under sim.
+
     python3 sim/run_main.py --ref main --seconds 18 --gif /tmp/rot.gif
     python3 sim/run_main.py --seconds 18 --gif /tmp/rot_head.gif   # current tree
 
